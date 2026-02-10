@@ -12,6 +12,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -52,6 +54,11 @@ public class GlobalExceptionHandler {
         return build(ex.getStatus(), ex.getCode(), ex.getMessage());
     }
 
+    @ExceptionHandler({AccessDeniedException.class, AuthorizationDeniedException.class})
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(Exception ex) {
+        return build(HttpStatus.FORBIDDEN, ApiCode.FORBIDDEN, "无权限访问该资源");
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception ex) {
         return build(HttpStatus.INTERNAL_SERVER_ERROR, ApiCode.INTERNAL_ERROR, "服务器内部错误");
@@ -61,4 +68,3 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(ApiResponse.error(code, message));
     }
 }
-

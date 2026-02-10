@@ -27,11 +27,11 @@
 - Redis：第一阶段不引入（必要时再加）
 
 ## 4. 仓库结构（建议）
-- `backend/`：Spring Boot 后端（当前已生成并可 BUILD SUCCESS）
+- `lab-flow-report-system/`：Spring Boot 后端
 - `frontend/`：Vue 前端（后续批次）
 - `docs/`：长期说明书
 - `log记录/`：决策日志 / 开发日志 / 任务单
-- `定稿记录.txt`：基线参考
+- `log记录/定稿记录.txt`：基线参考
 
 ## 5. 工作方式（对自动化开发的约束）
 - 先读文档再动手：`log记录/决策日志.md`、`Codex_第1批任务单_启动包.md`、本文件 `PLANS.md`
@@ -42,16 +42,19 @@
 ## 6. 里程碑与状态
 ### Milestone A：底座可用（当前批次）
 - [x] BOOT-001 工程底座与通用组件（统一返回/异常/日志/Swagger/健康检查）
-- [ ] DB-001 Flyway + RBAC 最小表结构 + 初始化数据
-- [ ] AUTH-001 登录 / JWT / RBAC（骨架）
+- [x] DB-001 Flyway + RBAC 最小表结构 + 初始化数据
+- [x] AUTH-001 登录 / JWT / RBAC（骨架）
 
 ### Milestone B：业务闭环 v1（下一批）
-- [ ] 任务管理（教师创建任务）
-- [ ] 报告提交（学生提交正文/附件/版本）
-- [ ] 批阅评分（教师评分评语）
-- [ ] 学生查看反馈
-- [ ] 导出成绩（CSV 优先）
+- [x] 任务管理（教师创建任务）
+- [x] 报告提交（学生提交正文/附件/版本）
+- [x] 批阅评分（教师评分评语）
+- [x] 学生查看反馈
+- [x] 导出成绩（CSV 优先）
 
 ## 7. 当前状态（手动维护）
 - 2026-02-10：后端骨架已通过 `mvn test`（BUILD SUCCESS），可进入 Milestone A 开发。
 - 2026-02-10：完成 BOOT-001（统一返回、全局异常、traceId、参数校验统一返回、`/api/ping`、Swagger、Actuator health），并通过 `.\mvnw.cmd -U clean test`。
+- 2026-02-10：完成 DB-001（Flyway 迁移 + RBAC/任务/报告/批阅/导出核心表 + 种子账号）。
+- 2026-02-10：完成 AUTH-001（`/api/auth/login`、`/api/auth/me`、`/api/auth/logout`、JWT + RBAC 鉴权）。
+- 2026-02-10：后端 M2 主链已可跑通（教师发任务 → 学生提交 → 教师批阅 → 学生查看反馈 → 教师导出 CSV）；`.\mvnw.cmd -U clean test` 共 8 个测试通过。

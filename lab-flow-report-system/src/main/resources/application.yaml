@@ -1,6 +1,15 @@
 spring:
   application:
     name: lab-flow-report-system
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/lab_flow_report?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8&createDatabaseIfNotExist=true}
+    username: ${DB_USER:root}
+    password: ${DB_PASS:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
   jackson:
     default-property-inclusion: non_null
 
@@ -17,3 +26,12 @@ management:
 logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [traceId=%X{traceId:-N/A}] - %msg%n"
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:LabFlowReportJwtSecretKeyForDevOnlyPleaseChangeInProd1234567890}
+    expire-minutes: ${JWT_EXPIRE_MINUTES:120}
