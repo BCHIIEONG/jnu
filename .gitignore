@@ -2,6 +2,7 @@
 Codex_*.txt
 docs/CODEX_*.md
 log记录/Codex任务单.md
+备份/
 
 # IDE
 .idea/
