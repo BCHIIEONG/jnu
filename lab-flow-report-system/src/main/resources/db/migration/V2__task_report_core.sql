@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS report_submission (
     task_id BIGINT NOT NULL,
     student_id BIGINT NOT NULL,
     version_no INT NOT NULL,
-    content_md CLOB NOT NULL,
+    content_md LONGTEXT NOT NULL,
     submit_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
     submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS report_review (
     submission_id BIGINT NOT NULL,
     teacher_id BIGINT NOT NULL,
     score DECIMAL(5, 2) NOT NULL,
-    comment CLOB,
+    comment LONGTEXT,
     reviewed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_review_submission FOREIGN KEY (submission_id) REFERENCES report_submission (id),
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS export_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     operator_id BIGINT NOT NULL,
     export_type VARCHAR(64) NOT NULL,
-    condition_json CLOB,
+    condition_json LONGTEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_export_operator FOREIGN KEY (operator_id) REFERENCES sys_user (id)
 );
