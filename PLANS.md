@@ -41,7 +41,7 @@
 
 ## 6. 里程碑与状态
 ### Milestone A：底座可用（当前批次）
-- [ ] BOOT-001 工程底座与通用组件（统一返回/异常/日志/Swagger/健康检查）
+- [x] BOOT-001 工程底座与通用组件（统一返回/异常/日志/Swagger/健康检查）
 - [ ] DB-001 Flyway + RBAC 最小表结构 + 初始化数据
 - [ ] AUTH-001 登录 / JWT / RBAC（骨架）
 
@@ -54,3 +54,4 @@
 
 ## 7. 当前状态（手动维护）
 - 2026-02-10：后端骨架已通过 `mvn test`（BUILD SUCCESS），可进入 Milestone A 开发。
+- 2026-02-10：完成 BOOT-001（统一返回、全局异常、traceId、参数校验统一返回、`/api/ping`、Swagger、Actuator health），并通过 `.\mvnw.cmd -U clean test`。
