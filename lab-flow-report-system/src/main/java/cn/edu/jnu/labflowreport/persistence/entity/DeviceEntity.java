@@ -7,17 +7,17 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("sys_user")
-public class SysUserEntity {
+@TableName("device")
+public class DeviceEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String username;
-    private String passwordHash;
-    private String displayName;
-    private Boolean enabled;
-    private Long departmentId;
-    private Long classId;
+    private String code;
+    private String name;
+    private String status;
+    private String location;
+    private String description;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
+

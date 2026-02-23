@@ -11,6 +11,8 @@ import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
 import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import jakarta.validation.Valid;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
@@ -92,15 +94,22 @@ public class ReportWorkflowController {
 
     @GetMapping("/tasks/{taskId}/scores/export")
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
-    public ResponseEntity<String> exportTaskScores(@PathVariable Long taskId) {
+    public ResponseEntity<byte[]> exportTaskScores(@PathVariable Long taskId) throws IOException {
         AuthenticatedUser user = SecurityUtils.currentUser();
         String csv = reportWorkflowService.exportScoresCsv(taskId, user);
         String filename = "task-" + taskId + "-scores.csv";
+
+        // Excel on Windows often mis-detects UTF-8 CSV; prepend BOM to make UTF-8 explicit.
+        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
+        out.write(0xEF);
+        out.write(0xBB);
+        out.write(0xBF);
+        out.write(csvBytes);
+
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CONTENT_ENCODING, StandardCharsets.UTF_8.name())
-                .body(csv);
+                .body(out.toByteArray());
     }
 }
-

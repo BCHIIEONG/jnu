@@ -7,17 +7,17 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("sys_user")
-public class SysUserEntity {
+@TableName("audit_log")
+public class AuditLogEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String username;
-    private String passwordHash;
-    private String displayName;
-    private Boolean enabled;
-    private Long departmentId;
-    private Long classId;
+    private Long actorId;
+    private String actorUsername;
+    private String action;
+    private String targetType;
+    private Long targetId;
+    private String detailJson;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }
+

@@ -8,6 +8,17 @@ log记录/Codex任务单.md
 .idea/
 **/.idea/
 **/workspace.xml
+.vscode/
+**/.vscode/
 
 # Build outputs
 **/target/
+
+# Frontend (Vite/Vue)
+frontend/node_modules/
+frontend/dist/
+frontend/.env*
+
+# Local-only helper scripts/artifacts (Codex/notes)
+tools/
+tools_explain_targets.txt

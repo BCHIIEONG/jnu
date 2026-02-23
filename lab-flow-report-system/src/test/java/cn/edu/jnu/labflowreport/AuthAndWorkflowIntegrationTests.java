@@ -1,6 +1,7 @@
 package cn.edu.jnu.labflowreport;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -94,6 +95,13 @@ class AuthAndWorkflowIntegrationTests {
         mockMvc.perform(get("/api/tasks/" + taskId + "/scores/export")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
                 .andExpect(status().isOk())
+                .andExpect(result -> {
+                    byte[] bytes = result.getResponse().getContentAsByteArray();
+                    assertTrue(bytes.length >= 3);
+                    assertTrue((bytes[0] & 0xFF) == 0xEF);
+                    assertTrue((bytes[1] & 0xFF) == 0xBB);
+                    assertTrue((bytes[2] & 0xFF) == 0xBF);
+                })
                 .andExpect(content().string(containsString("studentUsername")))
                 .andExpect(content().string(containsString("student")));
     }
