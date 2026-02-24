@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -133,6 +134,76 @@ class AdminIntegrationTests {
                 .andExpect(content().string(containsString("username")));
     }
 
+    @Test
+    void adminShouldDeleteStudentOnlyUser() throws Exception {
+        String adminToken = login("admin", "admin123");
+
+        // Create department
+        MvcResult depResult = mockMvc.perform(post("/api/admin/departments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"删除测试院系-" + Instant.now().getEpochSecond() + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number depIdNum = JsonPath.read(depResult.getResponse().getContentAsString(), "$.data.id");
+        long depId = depIdNum.longValue();
+
+        // Create class
+        MvcResult classResult = mockMvc.perform(post("/api/admin/classes")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"departmentId\":" + depId + ",\"name\":\"删除测试班级\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number classIdNum = JsonPath.read(classResult.getResponse().getContentAsString(), "$.data.id");
+        long classId = classIdNum.longValue();
+
+        String username = "del" + Instant.now().getEpochSecond();
+
+        // Create user
+        MvcResult userResult = mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"待删除学生",
+                                  "enabled":true,
+                                  "departmentId":%d,
+                                  "classId":%d,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(username, depId, classId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number userIdNum = JsonPath.read(userResult.getResponse().getContentAsString(), "$.data.id");
+        long userId = userIdNum.longValue();
+
+        // Delete should succeed for student-only user with no business data
+        mockMvc.perform(delete("/api/admin/users/" + userId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        // Deleting teacher should be rejected
+        MvcResult teacherList = mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .param("q", "teacher")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number teacherId = JsonPath.read(teacherList.getResponse().getContentAsString(), "$.data.items[0].id");
+        mockMvc.perform(delete("/api/admin/users/" + teacherId.longValue())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
     private String login(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -143,4 +214,3 @@ class AdminIntegrationTests {
         return JsonPath.read(result.getResponse().getContentAsString(), "$.data.token");
     }
 }
-

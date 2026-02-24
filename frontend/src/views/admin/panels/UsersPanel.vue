@@ -244,6 +244,31 @@ async function resetPassword(u: UserItem) {
   }
 }
 
+function isStudentOnly(u: UserItem) {
+  const rs = u.roleCodes ?? []
+  return rs.includes('ROLE_STUDENT') && !rs.includes('ROLE_TEACHER') && !rs.includes('ROLE_ADMIN')
+}
+
+async function deleteUser(u: UserItem) {
+  if (!isStudentOnly(u)) {
+    ElMessage.warning('只能删除仅学生账号')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除学生账号吗？\nusername=${u.username}\n提示：如果该学生已有提交/签到记录，后端会拒绝删除，请改用“禁用”。`,
+      '删除用户',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+    await apiData<void>(`/api/admin/users/${u.id}`, { method: 'DELETE' }, token.value)
+    ElMessage.success('已删除')
+    await loadUsers()
+  } catch (e: any) {
+    if (e === 'cancel' || e === 'close') return
+    ElMessage.error(e?.message ?? '删除失败')
+  }
+}
+
 async function exportUsers() {
   try {
     await downloadBlob('/api/admin/users/export', { token: token.value, fallbackFilename: 'users.csv' })
@@ -343,11 +368,12 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column prop="departmentName" label="院系" width="160" />
       <el-table-column prop="className" label="班级" width="180" />
-      <el-table-column label="操作" width="260" fixed="right">
+      <el-table-column label="操作" width="330" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
           <el-button size="small" @click="openRoles(row)">角色</el-button>
           <el-button size="small" type="warning" @click="resetPassword(row)">重置密码</el-button>
+          <el-button v-if="isStudentOnly(row)" size="small" type="danger" @click="deleteUser(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>

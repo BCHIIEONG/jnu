@@ -18,6 +18,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -79,6 +80,13 @@ public class AdminUserController {
         return ApiResponse.success("设置成功", null);
     }
 
+    @DeleteMapping("/users/{id}")
+    public ApiResponse<Void> deleteUser(@PathVariable Long id) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        adminUserService.deleteStudentUser(actor, id);
+        return ApiResponse.success("删除成功", null);
+    }
+
     @PostMapping(value = "/users/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<AdminUserImportResult> importUsers(@RequestParam("file") MultipartFile file) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
@@ -105,4 +113,3 @@ public class AdminUserController {
                 .body(out.toByteArray());
     }
 }
-

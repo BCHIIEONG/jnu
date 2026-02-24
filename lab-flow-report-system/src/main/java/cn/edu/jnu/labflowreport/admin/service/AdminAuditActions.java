@@ -7,6 +7,7 @@ public final class AdminAuditActions {
 
     public static final String USER_CREATE = "USER_CREATE";
     public static final String USER_UPDATE = "USER_UPDATE";
+    public static final String USER_DELETE = "USER_DELETE";
     public static final String USER_RESET_PASSWORD = "USER_RESET_PASSWORD";
     public static final String USER_SET_ROLES = "USER_SET_ROLES";
     public static final String USER_IMPORT = "USER_IMPORT";
@@ -39,4 +40,3 @@ public final class AdminAuditActions {
 
     public static final String AUDIT_EXPORT = "AUDIT_EXPORT";
 }
-

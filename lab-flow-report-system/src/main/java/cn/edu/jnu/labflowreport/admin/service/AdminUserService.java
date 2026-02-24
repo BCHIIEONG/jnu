@@ -8,6 +8,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminUserImportResult;
 import cn.edu.jnu.labflowreport.admin.dto.AdminUserUpdateRequest;
 import cn.edu.jnu.labflowreport.admin.dto.AdminUserVO;
 import cn.edu.jnu.labflowreport.admin.dto.PageResult;
+import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
@@ -18,6 +19,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgDepartmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysRoleMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserRoleMapper;
@@ -53,6 +55,8 @@ public class AdminUserService {
     private final OrgClassMapper orgClassMapper;
     private final PasswordEncoder passwordEncoder;
     private final AdminAuditService adminAuditService;
+    private final ReportSubmissionMapper reportSubmissionMapper;
+    private final AttendanceRecordMapper attendanceRecordMapper;
 
     public AdminUserService(
             SysUserMapper sysUserMapper,
@@ -61,7 +65,9 @@ public class AdminUserService {
             OrgDepartmentMapper orgDepartmentMapper,
             OrgClassMapper orgClassMapper,
             PasswordEncoder passwordEncoder,
-            AdminAuditService adminAuditService
+            AdminAuditService adminAuditService,
+            ReportSubmissionMapper reportSubmissionMapper,
+            AttendanceRecordMapper attendanceRecordMapper
     ) {
         this.sysUserMapper = sysUserMapper;
         this.sysRoleMapper = sysRoleMapper;
@@ -70,6 +76,8 @@ public class AdminUserService {
         this.orgClassMapper = orgClassMapper;
         this.passwordEncoder = passwordEncoder;
         this.adminAuditService = adminAuditService;
+        this.reportSubmissionMapper = reportSubmissionMapper;
+        this.attendanceRecordMapper = attendanceRecordMapper;
     }
 
     public PageResult<AdminUserVO> listUsers(
@@ -234,6 +242,32 @@ public class AdminUserService {
                 "username", existing.getUsername(),
                 "roleCodes", roleCodes
         ));
+    }
+
+    @Transactional
+    public void deleteStudentUser(AuthenticatedUser actor, Long userId) {
+        SysUserEntity existing = sysUserMapper.selectById(userId);
+        if (existing == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "用户不存在");
+        }
+
+        List<String> roles = sysUserMapper.findRoleCodesByUserId(userId);
+        boolean hasStudent = roles != null && roles.contains("ROLE_STUDENT");
+        boolean hasTeacherOrAdmin = roles != null && (roles.contains("ROLE_TEACHER") || roles.contains("ROLE_ADMIN"));
+        if (!hasStudent || hasTeacherOrAdmin) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "只能删除“仅学生”账号（不能删除教师/管理员或混合角色账号）");
+        }
+
+        long submissionCount = reportSubmissionMapper.countByStudentId(userId);
+        long attendanceCount = attendanceRecordMapper.countByStudentId(userId);
+        if (submissionCount > 0 || attendanceCount > 0) {
+            throw new BusinessException(ApiCode.BAD_REQUEST,
+                    "该学生已有业务数据（报告提交/签到记录），不允许删除；请改为禁用账号");
+        }
+
+        sysUserRoleMapper.delete(new LambdaQueryWrapper<SysUserRoleEntity>().eq(SysUserRoleEntity::getUserId, userId));
+        sysUserMapper.deleteById(userId);
+        adminAuditService.record(actor, AdminAuditActions.USER_DELETE, "sys_user", userId, Map.of("username", existing.getUsername()));
     }
 
     @Transactional

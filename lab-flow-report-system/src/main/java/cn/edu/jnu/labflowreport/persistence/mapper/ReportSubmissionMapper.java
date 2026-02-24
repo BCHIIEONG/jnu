@@ -11,6 +11,9 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface ReportSubmissionMapper extends BaseMapper<ReportSubmissionEntity> {
 
+    @Select("SELECT COUNT(1) FROM report_submission WHERE student_id = #{studentId}")
+    long countByStudentId(Long studentId);
+
     @Select("""
             SELECT COALESCE(MAX(version_no), 0)
             FROM report_submission
