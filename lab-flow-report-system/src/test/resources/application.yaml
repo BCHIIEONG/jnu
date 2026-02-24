@@ -14,8 +14,11 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 
+app:
+  storage:
+    dir: target/test-uploads
+
 security:
   jwt:
     secret: TestJwtSecretKeyForBootAndAuthFlowValidation123456789
     expire-minutes: 120
-

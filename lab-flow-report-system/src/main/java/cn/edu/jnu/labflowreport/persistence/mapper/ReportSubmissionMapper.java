@@ -52,6 +52,22 @@ public interface ReportSubmissionMapper extends BaseMapper<ReportSubmissionEntit
             """)
     List<SubmissionVO> findSubmissionsByTask(Long taskId);
 
+    @Select("""
+            SELECT s.id,
+                   s.task_id,
+                   s.student_id,
+                   u.username AS student_username,
+                   u.display_name AS student_display_name,
+                   s.version_no,
+                   s.content_md,
+                   s.submit_status,
+                   s.submitted_at
+            FROM report_submission s
+            JOIN sys_user u ON u.id = s.student_id
+            WHERE s.id = #{submissionId}
+            """)
+    SubmissionVO findSubmissionById(Long submissionId);
+
     @Select("SELECT student_id FROM report_submission WHERE id = #{submissionId}")
     Long findStudentIdBySubmissionId(Long submissionId);
 

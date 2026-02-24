@@ -111,6 +111,30 @@ export async function downloadBlob(
   return { filename }
 }
 
+export async function fetchBlob(
+  path: string,
+  opts: { token: string },
+): Promise<{ blob: Blob; filename: string | null; contentType: string | null }> {
+  const res = await fetch(buildUrl(path), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${opts.token}`,
+    },
+  })
+
+  if (!res.ok) {
+    await parseJsonOrThrow(res)
+    throw new ApiError({ status: res.status, message: `HTTP ${res.status}` })
+  }
+
+  const blob = await res.blob()
+  return {
+    blob,
+    filename: parseFilenameFromContentDisposition(res.headers.get('content-disposition')),
+    contentType: res.headers.get('content-type'),
+  }
+}
+
 export async function uploadFormData<T>(
   path: string,
   opts: { token: string; formData: FormData },

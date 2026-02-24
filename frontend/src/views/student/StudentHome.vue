@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiData } from '../../api/http'
+import { apiData, downloadBlob, fetchBlob, uploadFormData } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 
 type TaskVO = {
@@ -21,6 +21,15 @@ type SubmissionVO = {
   versionNo: number
   contentMd: string
   submittedAt: string
+}
+
+type AttachmentVO = {
+  id: number
+  submissionId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedAt: string
 }
 
 type ReviewVO = {
@@ -49,6 +58,17 @@ const submitting = ref(false)
 const reviewDialogOpen = ref(false)
 const currentReview = ref<ReviewVO | null>(null)
 const loadingReview = ref(false)
+
+const attachDialogOpen = ref(false)
+const attachTarget = ref<SubmissionVO | null>(null)
+const attachments = ref<AttachmentVO[]>([])
+const loadingAttachments = ref(false)
+const uploading = ref(false)
+const uploadFile = ref<File | null>(null)
+
+const previewDialog = ref(false)
+const previewUrl = ref<string | null>(null)
+const previewTitle = ref('')
 
 async function loadTasks() {
   loadingTasks.value = true
@@ -118,6 +138,91 @@ async function viewReview(submissionId: number) {
   }
 }
 
+async function openAttachments(row: SubmissionVO) {
+  attachTarget.value = row
+  attachDialogOpen.value = true
+  uploadFile.value = null
+  await loadAttachments(row.id)
+}
+
+async function loadAttachments(submissionId: number) {
+  loadingAttachments.value = true
+  try {
+    attachments.value = await apiData<AttachmentVO[]>(
+      `/api/submissions/${submissionId}/attachments`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    attachments.value = []
+    ElMessage.error(e?.message ?? '加载附件失败')
+  } finally {
+    loadingAttachments.value = false
+  }
+}
+
+function onPickFile(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const f = input.files?.[0] ?? null
+  uploadFile.value = f
+}
+
+async function uploadAttachment() {
+  if (!attachTarget.value) return
+  if (!uploadFile.value) {
+    ElMessage.warning('请选择文件')
+    return
+  }
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', uploadFile.value)
+    await uploadFormData(`/api/submissions/${attachTarget.value.id}/attachments`, { token: auth.token, formData: fd })
+    ElMessage.success('上传成功')
+    uploadFile.value = null
+    await loadAttachments(attachTarget.value.id)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function downloadAttachment(row: AttachmentVO) {
+  try {
+    await downloadBlob(`/api/attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+function closePreview() {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  previewUrl.value = null
+  previewTitle.value = ''
+  previewDialog.value = false
+}
+
+async function previewAttachment(row: AttachmentVO) {
+  const ct = row.contentType ?? ''
+  if (!ct.startsWith('image/')) {
+    ElMessage.info('暂只支持图片在线预览，请下载查看')
+    return
+  }
+  try {
+    closePreview()
+    const { blob } = await fetchBlob(`/api/attachments/${row.id}/download`, { token: auth.token })
+    previewUrl.value = URL.createObjectURL(blob)
+    previewTitle.value = row.fileName
+    previewDialog.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
+  }
+}
+
 function logout() {
   auth.logout()
   router.replace('/login')
@@ -182,9 +287,10 @@ onMounted(loadTasks)
           <el-table :data="mySubmissions" size="small" v-loading="loadingSubs">
             <el-table-column prop="versionNo" label="版本" width="80" />
             <el-table-column prop="submittedAt" label="提交时间" min-width="180" />
-          <el-table-column label="操作" width="140">
+            <el-table-column label="操作" width="220">
               <template #default="{ row }: { row: SubmissionVO }">
                 <el-button size="small" @click="viewReview(row.id)">查看批阅</el-button>
+                <el-button size="small" @click="openAttachments(row)">附件</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -204,6 +310,41 @@ onMounted(loadTasks)
       </div>
       <div style="margin-top: 10px; white-space: pre-wrap">评语：{{ currentReview.comment || '（无）' }}</div>
     </div>
+  </el-dialog>
+
+  <el-dialog v-model="attachDialogOpen" title="附件管理" width="900px" @closed="closePreview">
+    <div v-if="attachTarget" class="meta" style="margin-bottom: 10px; display: flex; justify-content: space-between">
+      <div>提交：v{{ attachTarget.versionNo }}（ID: {{ attachTarget.id }}）</div>
+      <div>
+        <el-button size="small" @click="loadAttachments(attachTarget.id)" :loading="loadingAttachments">刷新</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never" style="margin-bottom: 12px">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+        <input type="file" @change="onPickFile" />
+        <el-button type="primary" size="small" :loading="uploading" @click="uploadAttachment">上传</el-button>
+        <div class="meta">支持图片/文件；老师端可下载与预览图片。</div>
+      </div>
+    </el-card>
+
+    <el-table :data="attachments" size="small" v-loading="loadingAttachments">
+      <el-table-column prop="fileName" label="文件名" min-width="260" />
+      <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
+      <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
+      <el-table-column label="操作" width="180">
+        <template #default="{ row }: { row: AttachmentVO }">
+          <el-button size="small" @click="downloadAttachment(row)">下载</el-button>
+          <el-button size="small" @click="previewAttachment(row)">预览</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="meta" style="margin-top: 6px">目前仅支持图片在线预览（其他类型请下载）。</div>
+  </el-dialog>
+
+  <el-dialog v-model="previewDialog" :title="previewTitle || '附件预览'" width="900px" @closed="closePreview">
+    <div v-if="!previewUrl">加载中...</div>
+    <img v-else :src="previewUrl" style="max-width: 100%; max-height: 70vh; display: block; margin: 0 auto" />
   </el-dialog>
 </template>
 

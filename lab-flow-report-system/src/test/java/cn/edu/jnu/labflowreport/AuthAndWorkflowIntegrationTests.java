@@ -3,6 +3,7 @@ package cn.edu.jnu.labflowreport;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,6 +16,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -104,6 +106,76 @@ class AuthAndWorkflowIntegrationTests {
                 })
                 .andExpect(content().string(containsString("studentUsername")))
                 .andExpect(content().string(containsString("student")));
+    }
+
+    @Test
+    void attachmentsShouldUploadAndDownloadWithPermission() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+        String studentToken = login("student", "student123");
+
+        MvcResult createTaskResult = mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"附件任务","description":"附件上传下载测试"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number taskIdNum = JsonPath.read(createTaskResult.getResponse().getContentAsString(), "$.data.id");
+        long taskId = taskIdNum.longValue();
+
+        MvcResult submitResult = mockMvc.perform(post("/api/tasks/" + taskId + "/submissions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contentMd":"# 报告\\n包含附件"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number submissionIdNum = JsonPath.read(submitResult.getResponse().getContentAsString(), "$.data.id");
+        long submissionId = submissionIdNum.longValue();
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "test.txt",
+                "text/plain",
+                "hello attachment".getBytes()
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/submissions/" + submissionId + "/attachments")
+                        .file(file)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.fileName").value("test.txt"))
+                .andReturn();
+        Number attachmentIdNum = JsonPath.read(uploadResult.getResponse().getContentAsString(), "$.data.id");
+        long attachmentId = attachmentIdNum.longValue();
+
+        mockMvc.perform(get("/api/submissions/" + submissionId + "/attachments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data[0].fileName").value("test.txt"));
+
+        mockMvc.perform(get("/api/attachments/" + attachmentId + "/download")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertTrue(result.getResponse().getContentAsByteArray().length > 0));
+
+        mockMvc.perform(get("/api/submissions/" + submissionId + "/content/download")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    byte[] bytes = result.getResponse().getContentAsByteArray();
+                    assertTrue(bytes.length >= 3);
+                    assertTrue((bytes[0] & 0xFF) == 0xEF);
+                    assertTrue((bytes[1] & 0xFF) == 0xBB);
+                    assertTrue((bytes[2] & 0xFF) == 0xBF);
+                })
+                .andExpect(content().string(containsString("# 报告")));
     }
 
     private String login(String username, String password) throws Exception {

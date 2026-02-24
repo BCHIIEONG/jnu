@@ -31,6 +31,10 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 
+app:
+  storage:
+    dir: ${FILE_STORAGE_DIR:uploads}
+
 security:
   jwt:
     secret: ${JWT_SECRET:LabFlowReportJwtSecretKeyForDevOnlyPleaseChangeInProd1234567890}
