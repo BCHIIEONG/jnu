@@ -6,6 +6,7 @@ import LoginView from '../views/LoginView.vue'
 import StudentHome from '../views/student/StudentHome.vue'
 import TeacherHome from '../views/teacher/TeacherHome.vue'
 import AdminHome from '../views/admin/AdminHome.vue'
+import MobileCheckinView from '../views/mobile/MobileCheckinView.vue'
 
 type Role = 'ROLE_STUDENT' | 'ROLE_TEACHER' | 'ROLE_ADMIN'
 
@@ -22,6 +23,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/student', component: StudentHome, meta: { roles: ['ROLE_STUDENT'] } },
   { path: '/teacher', component: TeacherHome, meta: { roles: ['ROLE_TEACHER', 'ROLE_ADMIN'] } },
   { path: '/admin', component: AdminHome, meta: { roles: ['ROLE_ADMIN'] } },
+  { path: '/m/checkin', component: MobileCheckinView, meta: { roles: ['ROLE_STUDENT'] } },
 ]
 
 export const router = createRouter({
@@ -56,4 +58,3 @@ router.beforeEach(async (to) => {
 
   return true
 })
-

@@ -5,6 +5,8 @@ import RbacSelfCheck from '../common/RbacSelfCheck.vue'
 import UsersPanel from './panels/UsersPanel.vue'
 import DepartmentsPanel from './panels/DepartmentsPanel.vue'
 import ClassesPanel from './panels/ClassesPanel.vue'
+import TimeSlotsPanel from './panels/TimeSlotsPanel.vue'
+import CourseSchedulesPanel from './panels/CourseSchedulesPanel.vue'
 import LabRoomsPanel from './panels/LabRoomsPanel.vue'
 import DevicesPanel from './panels/DevicesPanel.vue'
 import SemestersPanel from './panels/SemestersPanel.vue'
@@ -40,6 +42,12 @@ function logout() {
           </el-tab-pane>
           <el-tab-pane label="班级管理">
             <ClassesPanel />
+          </el-tab-pane>
+          <el-tab-pane label="节次管理">
+            <TimeSlotsPanel />
+          </el-tab-pane>
+          <el-tab-pane label="课表管理">
+            <CourseSchedulesPanel />
           </el-tab-pane>
           <el-tab-pane label="实验室信息">
             <LabRoomsPanel />

@@ -19,5 +19,12 @@ public interface SysUserMapper extends BaseMapper<SysUserEntity> {
             WHERE ur.user_id = #{userId}
             """)
     List<String> findRoleCodesByUserId(Long userId);
-}
 
+    @Select("""
+            SELECT id, username, display_name, class_id
+            FROM sys_user
+            WHERE class_id = #{classId} AND enabled = TRUE
+            ORDER BY username ASC
+            """)
+    List<SysUserEntity> findStudentsByClassId(Long classId);
+}
