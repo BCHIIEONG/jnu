@@ -19,3 +19,25 @@ body {
 #app {
   min-height: 100vh;
 }
+
+:root[data-ui='mobile'] .el-main {
+  padding: 8px !important;
+}
+
+:root[data-ui='mobile'] .el-header {
+  height: auto !important;
+  padding: 8px 10px !important;
+}
+
+:root[data-ui='mobile'] .el-dialog {
+  width: 92vw !important;
+  max-width: 92vw !important;
+}
+
+:root[data-ui='mobile'] .el-dialog__body {
+  padding: 10px 12px !important;
+}
+
+:root[data-ui='mobile'] .el-table {
+  font-size: 12px;
+}

@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import RbacSelfCheck from '../common/RbacSelfCheck.vue'
+import UiModeToggle from '../common/UiModeToggle.vue'
 import UsersPanel from './panels/UsersPanel.vue'
 import DepartmentsPanel from './panels/DepartmentsPanel.vue'
 import ClassesPanel from './panels/ClassesPanel.vue'
@@ -28,6 +29,7 @@ function logout() {
       <div class="brand">管理员端</div>
       <div class="right">
         <span class="user">{{ auth.displayName }}</span>
+        <UiModeToggle />
         <el-button size="small" @click="logout">退出</el-button>
       </div>
     </el-header>
@@ -91,6 +93,7 @@ function logout() {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .main {
   padding: 14px;

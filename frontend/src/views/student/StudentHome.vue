@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob, uploadFormData } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
+import UiModeToggle from '../common/UiModeToggle.vue'
 
 type TaskVO = {
   id: number
@@ -237,6 +238,7 @@ onMounted(loadTasks)
       <div class="brand">学生端</div>
       <div class="right">
         <span class="user">{{ auth.displayName }}</span>
+        <UiModeToggle />
         <el-button size="small" @click="logout">退出</el-button>
       </div>
     </el-header>
@@ -366,6 +368,7 @@ onMounted(loadTasks)
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .user {
   color: #333;

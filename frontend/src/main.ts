@@ -5,11 +5,15 @@ import 'element-plus/dist/index.css'
 
 import App from './App.vue'
 import { router } from './router'
+import { useUiStore } from './stores/ui'
 
 import './style.css'
 
+const pinia = createPinia()
+useUiStore(pinia).init()
+
 createApp(App)
-  .use(createPinia())
+  .use(pinia)
   .use(router)
   .use(ElementPlus)
   .mount('#app')

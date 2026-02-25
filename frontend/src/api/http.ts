@@ -19,7 +19,12 @@ export class ApiError extends Error {
   }
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8080'
+const DEFAULT_API_BASE =
+  typeof window === 'undefined'
+    ? 'http://localhost:8080'
+    : `${window.location.protocol}//${window.location.hostname}:8080`
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE
 
 function buildUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path

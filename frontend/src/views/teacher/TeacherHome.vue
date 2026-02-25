@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
+import UiModeToggle from '../common/UiModeToggle.vue'
 import QRCode from 'qrcode'
 
 type TaskVO = {
@@ -545,6 +546,7 @@ async function copyLink() {
       <div class="brand">教师端</div>
       <div class="right">
         <span class="user">{{ auth.displayName }}</span>
+        <UiModeToggle />
         <el-button size="small" @click="createDialog = true">新建任务</el-button>
         <el-button size="small" @click="logout">退出</el-button>
       </div>
@@ -824,6 +826,7 @@ async function copyLink() {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .user {
   color: #333;
