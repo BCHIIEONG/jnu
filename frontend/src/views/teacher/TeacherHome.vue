@@ -70,6 +70,7 @@ type AttendanceRecord = {
   checkedInAt: string
 }
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
+type AttendanceStaticCodeVO = { code: string }
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -127,6 +128,7 @@ const loadingRoster = ref(false)
 const session = ref<AttendanceSession | null>(null)
 const tokenInfo = ref<AttendanceTokenVO | null>(null)
 const qrDataUrl = ref<string | null>(null)
+const staticCode = ref<string | null>(null)
 
 const QR_MODE_KEY = 'labflow.att.qrMode'
 const QR_REFRESH_SECONDS_KEY = 'labflow.att.qrRefreshSeconds'
@@ -205,9 +207,8 @@ watch(
     // Apply immediately if a session is open.
     if (session.value) {
       startLoops()
-      if (v === 'dynamic') {
-        refreshToken()
-      }
+      if (v === 'dynamic') refreshToken()
+      else refreshStaticCode()
     }
   },
   { flush: 'post' },
@@ -567,6 +568,7 @@ async function openClass(item: WeekScheduleItem) {
   session.value = null
   tokenInfo.value = null
   qrDataUrl.value = null
+  staticCode.value = null
   records.value = []
   await loadRoster()
 }
@@ -597,7 +599,11 @@ async function startSession() {
       auth.token,
     )
     ElMessage.success('签到已开启')
-    await refreshToken()
+    if (qrMode.value === 'dynamic') {
+      await refreshToken()
+    } else {
+      await refreshStaticCode()
+    }
     await refreshRecords()
     startLoops()
   } catch (e: any) {
@@ -624,10 +630,30 @@ async function refreshToken() {
       { method: 'GET' },
       auth.token,
     )
-    const link = checkinLink.value
-    qrDataUrl.value = await QRCode.toDataURL(link, { width: 220, margin: 1 })
   } catch (e: any) {
     ElMessage.error(e?.message ?? '刷新二维码失败')
+  }
+}
+
+async function refreshStaticCode() {
+  if (!session.value) return
+  try {
+    const res = await apiData<AttendanceStaticCodeVO>(
+      `/api/attendance/sessions/${session.value.id}/static-code`,
+      { method: 'GET' },
+      auth.token,
+    )
+    staticCode.value = res.code
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '获取静态二维码失败')
+  }
+}
+
+async function refreshQr() {
+  if (qrMode.value === 'dynamic') {
+    await refreshToken()
+  } else {
+    await refreshStaticCode()
   }
 }
 
@@ -700,6 +726,13 @@ async function exportAttendanceCsv() {
 }
 
 const checkinLink = computed(() => {
+  if (qrMode.value === 'static') {
+    const c = staticCode.value ?? ''
+    if (!c) return ''
+    const base = (mobileBase.value ?? '').trim().replace(/\/$/, '')
+    return `${base}/m/checkin?c=${encodeURIComponent(c)}`
+  }
+
   const t = tokenInfo.value?.token ?? ''
   if (!t) return ''
   const base = (mobileBase.value ?? '').trim().replace(/\/$/, '')
@@ -989,7 +1022,7 @@ async function copyLink() {
         <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>
         <el-button size="small" type="primary" @click="startSession" :disabled="!!session">开启签到</el-button>
         <el-button size="small" type="danger" @click="closeSession" :disabled="!session">结束签到</el-button>
-        <el-button size="small" @click="refreshToken" :disabled="!session">刷新二维码</el-button>
+        <el-button size="small" @click="refreshQr" :disabled="!session">刷新二维码</el-button>
         <el-button size="small" @click="refreshRecords" :disabled="!session">刷新名单</el-button>
       </div>
 
@@ -997,7 +1030,7 @@ async function copyLink() {
         当前基址是 localhost，手机扫码会访问到手机自己的 localhost，必定打不开。建议改成电脑局域网 IP。
       </div>
       <div v-else-if="qrMode === 'dynamic' && tokenInfo?.ttlSeconds" class="meta" style="margin-top: 6px">
-        提示：后端 token TTL = {{ tokenInfo.ttlSeconds }} 秒，建议刷新间隔不要超过 {{ Math.max(1, tokenInfo.ttlSeconds - 1) }} 秒。
+        提示：动态二维码为了“旧码快速失效”，后端 token TTL = {{ tokenInfo.ttlSeconds }} 秒，刷新间隔不要超过 {{ Math.max(1, tokenInfo.ttlSeconds - 1) }} 秒；需要更久请切换“静态”。
       </div>
 
       <div v-if="session" class="meta" style="margin-top: 6px">

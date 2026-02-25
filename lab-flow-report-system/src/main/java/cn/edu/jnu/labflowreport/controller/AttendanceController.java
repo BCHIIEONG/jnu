@@ -3,6 +3,7 @@ package cn.edu.jnu.labflowreport.controller;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceManualCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceSessionCreateRequest;
+import cn.edu.jnu.labflowreport.attendance.dto.AttendanceStaticCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
 import cn.edu.jnu.labflowreport.attendance.service.AttendanceService;
 import cn.edu.jnu.labflowreport.attendance.service.AttendanceTokenService;
@@ -64,6 +65,14 @@ public class AttendanceController {
         return ApiResponse.success(tokenService.issueToken(sessionId));
     }
 
+    @GetMapping("/sessions/{sessionId}/static-code")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<StaticCodeResponse> getStaticCode(@PathVariable Long sessionId) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        String code = attendanceService.getOrCreateStaticCode(actor, sessionId);
+        return ApiResponse.success(new StaticCodeResponse(code));
+    }
+
     @PostMapping("/checkin")
     @PreAuthorize("hasRole('STUDENT')")
     public ApiResponse<CheckinResponse> checkIn(@Valid @RequestBody AttendanceCheckinRequest request, HttpServletRequest http) {
@@ -72,6 +81,18 @@ public class AttendanceController {
         String ua = http.getHeader("User-Agent");
 
         AttendanceService.CheckinResult result = attendanceService.checkInByToken(student, request.token(), ip, ua);
+        CheckinResponse data = new CheckinResponse(result.recordId(), result.alreadyCheckedIn(), result.checkedInAt().toString());
+        return ApiResponse.success(result.alreadyCheckedIn() ? "已签到" : "签到成功", data);
+    }
+
+    @PostMapping("/checkin/static")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ApiResponse<CheckinResponse> checkInStatic(@Valid @RequestBody AttendanceStaticCheckinRequest request, HttpServletRequest http) {
+        AuthenticatedUser student = SecurityUtils.currentUser();
+        String ip = http.getRemoteAddr();
+        String ua = http.getHeader("User-Agent");
+
+        AttendanceService.CheckinResult result = attendanceService.checkInByStaticCode(student, request.code(), ip, ua);
         CheckinResponse data = new CheckinResponse(result.recordId(), result.alreadyCheckedIn(), result.checkedInAt().toString());
         return ApiResponse.success(result.alreadyCheckedIn() ? "已签到" : "签到成功", data);
     }
@@ -113,5 +134,7 @@ public class AttendanceController {
 
     public record CheckinResponse(Long recordId, boolean alreadyCheckedIn, String checkedInAt) {
     }
-}
 
+    public record StaticCodeResponse(String code) {
+    }
+}

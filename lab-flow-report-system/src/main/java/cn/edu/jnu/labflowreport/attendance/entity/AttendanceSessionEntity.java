@@ -17,9 +17,9 @@ public class AttendanceSessionEntity {
     private Long classId;
     private Long teacherId;
     private String status;
+    private String staticCode;
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

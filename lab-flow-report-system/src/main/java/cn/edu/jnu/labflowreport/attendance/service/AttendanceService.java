@@ -16,12 +16,14 @@ import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
 import cn.edu.jnu.labflowreport.schedule.mapper.CourseScheduleMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Base64;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +36,7 @@ public class AttendanceService {
     private final AttendanceTokenService tokenService;
     private final CourseScheduleMapper courseScheduleMapper;
     private final SysUserMapper sysUserMapper;
+    private final SecureRandom random = new SecureRandom();
 
     public AttendanceService(
             AttendanceSessionMapper sessionMapper,
@@ -186,6 +189,68 @@ public class AttendanceService {
     }
 
     @Transactional
+    public String getOrCreateStaticCode(AuthenticatedUser actor, Long sessionId) {
+        AttendanceSessionEntity session = getOpenSessionOrThrow(sessionId);
+        ensureTeacherOrAdmin(actor, session);
+        String existing = session.getStaticCode();
+        if (existing != null && !existing.isBlank()) {
+            return existing.trim();
+        }
+
+        String code = generateStaticCodeUnique();
+        session.setStaticCode(code);
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionMapper.updateById(session);
+        return code;
+    }
+
+    @Transactional
+    public CheckinResult checkInByStaticCode(AuthenticatedUser student, String code, String ip, String userAgent) {
+        if (!student.roleCodes().contains("ROLE_STUDENT")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只有学生可以签到");
+        }
+        if (code == null || code.isBlank()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "code 不能为空");
+        }
+
+        AttendanceSessionEntity session = sessionMapper.findOpenByStaticCode(code.trim());
+        if (session == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
+        }
+
+        SysUserEntity me = sysUserMapper.selectById(student.userId());
+        if (me == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
+        }
+        if (me.getClassId() == null || !me.getClassId().equals(session.getClassId())) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该班级，无法签到");
+        }
+
+        AttendanceRecordEntity existing = recordMapper.selectOne(
+                new LambdaQueryWrapper<AttendanceRecordEntity>()
+                        .eq(AttendanceRecordEntity::getSessionId, session.getId())
+                        .eq(AttendanceRecordEntity::getStudentId, student.userId())
+                        .last("LIMIT 1")
+        );
+        if (existing != null) {
+            return new CheckinResult(existing.getId(), true, existing.getCheckedInAt());
+        }
+
+        AttendanceRecordEntity entity = new AttendanceRecordEntity();
+        entity.setSessionId(session.getId());
+        entity.setStudentId(student.userId());
+        entity.setMethod("STATIC_QR");
+        entity.setCheckedInAt(LocalDateTime.now());
+        entity.setIp(ip);
+        entity.setUserAgent(userAgent);
+        entity.setOperatorId(null);
+        entity.setCreatedAt(LocalDateTime.now());
+        recordMapper.insert(entity);
+
+        return new CheckinResult(entity.getId(), false, entity.getCheckedInAt());
+    }
+
+    @Transactional
     public void manualCheckIn(AuthenticatedUser actor, Long sessionId, AttendanceManualCheckinRequest request) {
         AttendanceSessionEntity session = getOpenSessionOrThrow(sessionId);
         ensureTeacherOrAdmin(actor, session);
@@ -301,6 +366,24 @@ public class AttendanceService {
         if (value == null) return "";
         String text = String.valueOf(value).replace("\"", "\"\"");
         return "\"" + text + "\"";
+    }
+
+    private String generateStaticCodeUnique() {
+        for (int i = 0; i < 5; i++) {
+            String code = randomStaticCode();
+            AttendanceSessionEntity exists = sessionMapper.findOpenByStaticCode(code);
+            if (exists == null) {
+                return code;
+            }
+        }
+        // Very unlikely; last resort generate without checking and rely on unique index.
+        return randomStaticCode();
+    }
+
+    private String randomStaticCode() {
+        byte[] bytes = new byte[12];
+        random.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     public record CheckinResult(Long recordId, boolean alreadyCheckedIn, LocalDateTime checkedInAt) {

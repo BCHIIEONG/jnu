@@ -21,16 +21,21 @@ const data = ref<CheckinResponse | null>(null)
 
 async function run() {
   const token = (route.query.t as string | undefined) ?? ''
-  if (!token) {
+  const code = (route.query.c as string | undefined) ?? ''
+  if (!token && !code) {
     status.value = 'fail'
-    message.value = '缺少签到 token（t）'
+    message.value = '缺少签到参数（t 或 c）'
     return
   }
 
   status.value = 'loading'
   message.value = '正在签到...'
   try {
-    data.value = await apiData<CheckinResponse>('/api/attendance/checkin', { method: 'POST', body: { token } }, auth.token)
+    if (code) {
+      data.value = await apiData<CheckinResponse>('/api/attendance/checkin/static', { method: 'POST', body: { code } }, auth.token)
+    } else {
+      data.value = await apiData<CheckinResponse>('/api/attendance/checkin', { method: 'POST', body: { token } }, auth.token)
+    }
     status.value = 'ok'
     message.value = data.value.alreadyCheckedIn ? '已签到（重复扫码）' : '签到成功'
   } catch (e: any) {

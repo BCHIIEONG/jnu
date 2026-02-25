@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.Select;
 public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEntity> {
 
     @Select("""
-            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, started_at, ended_at, created_at, updated_at
+            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, started_at, ended_at, created_at, updated_at
             FROM attendance_session
             WHERE schedule_id = #{scheduleId} AND status = 'OPEN'
             ORDER BY started_at DESC, id DESC
@@ -18,7 +18,7 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
     AttendanceSessionEntity findOpenByScheduleId(Long scheduleId);
 
     @Select("""
-            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, started_at, ended_at, created_at, updated_at
+            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, started_at, ended_at, created_at, updated_at
             FROM attendance_session
             WHERE semester_id = #{semesterId}
               AND class_id = #{classId}
@@ -28,5 +28,14 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
             LIMIT 1
             """)
     AttendanceSessionEntity findOpenByKey(Long semesterId, Long classId, Long teacherId);
-}
 
+    @Select("""
+            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, started_at, ended_at, created_at, updated_at
+            FROM attendance_session
+            WHERE static_code = #{code}
+              AND status = 'OPEN'
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """)
+    AttendanceSessionEntity findOpenByStaticCode(String code);
+}

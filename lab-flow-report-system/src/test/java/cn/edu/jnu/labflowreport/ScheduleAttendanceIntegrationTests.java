@@ -76,6 +76,25 @@ class ScheduleAttendanceIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
+        // Create an extra student for dynamic-token check-in (so we can test both static and dynamic flows).
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"student_dyn",
+                                  "displayName":"Dynamic Student",
+                                  "password":"student123",
+                                  "enabled":true,
+                                  "classId":%d,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(classId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        String dynToken = login("student_dyn", "student123");
+
         // Create a time slot.
         MvcResult slot = mockMvc.perform(post("/api/admin/time-slots")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
@@ -129,6 +148,23 @@ class ScheduleAttendanceIntegrationTests {
         Number sessionIdNum = JsonPath.read(session.getResponse().getContentAsString(), "$.data.id");
         long sessionId = sessionIdNum.longValue();
 
+        // Teacher can get a static QR code.
+        MvcResult staticRes = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/static-code")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        String staticCode = JsonPath.read(staticRes.getResponse().getContentAsString(), "$.data.code");
+
+        // Student can check in via static QR.
+        mockMvc.perform(post("/api/attendance/checkin/static")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"" + staticCode + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.alreadyCheckedIn").value(false));
+
         // Student cannot fetch tokens.
         mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
@@ -144,7 +180,7 @@ class ScheduleAttendanceIntegrationTests {
 
         // Student check-in.
         mockMvc.perform(post("/api/attendance/checkin")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + dynToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + token + "\"}"))
                 .andExpect(status().isOk())
@@ -153,7 +189,7 @@ class ScheduleAttendanceIntegrationTests {
 
         // Second check-in should be idempotent.
         mockMvc.perform(post("/api/attendance/checkin")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + dynToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"token\":\"" + token + "\"}"))
                 .andExpect(status().isOk())
@@ -165,7 +201,8 @@ class ScheduleAttendanceIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(content().string(containsString("student")));
+                .andExpect(content().string(containsString("student")))
+                .andExpect(content().string(containsString("student_dyn")));
 
         // Export CSV should have BOM.
         mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/export")
@@ -180,6 +217,7 @@ class ScheduleAttendanceIntegrationTests {
                 })
                 .andExpect(content().string(containsString("studentUsername")))
                 .andExpect(content().string(containsString("student_absent")))
+                .andExpect(content().string(containsString("student_dyn")))
                 .andExpect(content().string(containsString("NOT_CHECKED_IN")))
                 .andExpect(content().string(containsString("CHECKED_IN")));
     }
