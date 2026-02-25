@@ -14,14 +14,21 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 :root[data-ui='mobile'] .el-main {
   padding: 8px !important;
+}
+
+:root[data-ui='mobile'] .el-input__inner,
+:root[data-ui='mobile'] .el-textarea__inner {
+  font-size: 16px !important;
 }
 
 :root[data-ui='mobile'] .el-header {
@@ -40,4 +47,8 @@ body {
 
 :root[data-ui='mobile'] .el-table {
   font-size: 12px;
+}
+
+:root[data-ui='mobile'] .el-table__body-wrapper {
+  overflow-x: auto;
 }

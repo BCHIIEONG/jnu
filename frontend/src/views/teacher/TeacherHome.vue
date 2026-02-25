@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 import UiModeToggle from '../common/UiModeToggle.vue'
+import { useUiStore } from '../../stores/ui'
 import QRCode from 'qrcode'
 
 type TaskVO = {
@@ -71,7 +72,10 @@ type AttendanceRecord = {
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
 
 const auth = useAuthStore()
+const ui = useUiStore()
 const router = useRouter()
+
+const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
 const activeTab = ref<'report' | 'schedule'>('report')
 
@@ -552,7 +556,7 @@ async function copyLink() {
       </div>
     </el-header>
     <el-container>
-      <el-aside v-if="activeTab === 'report'" width="360px" class="aside">
+      <el-aside v-if="activeTab === 'report' && !isMobile" width="360px" class="aside">
         <div class="aside-title">任务列表</div>
         <el-table
           :data="tasks"
@@ -569,6 +573,21 @@ async function copyLink() {
       <el-main class="main">
         <el-tabs v-model="activeTab" class="tabs">
           <el-tab-pane label="报告管理" name="report">
+            <el-card v-if="isMobile" class="block" shadow="never">
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                <el-select
+                  v-model="selectedTaskId"
+                  placeholder="选择任务"
+                  style="width: 260px"
+                  :loading="loadingTasks"
+                  @change="(id: any) => id && selectTask(Number(id))"
+                >
+                  <el-option v-for="t in tasks" :key="t.id" :label="t.title" :value="t.id" />
+                </el-select>
+                <el-button size="small" :loading="loadingTasks" @click="loadTasks">刷新任务</el-button>
+              </div>
+            </el-card>
+
             <el-card v-if="taskDetail" class="block" shadow="never">
               <template #header>
                 <div style="display: flex; justify-content: space-between; align-items: center">
@@ -811,6 +830,7 @@ async function copyLink() {
 <style scoped>
 .layout {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 .header {
   display: flex;

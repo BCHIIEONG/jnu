@@ -82,6 +82,7 @@ onMounted(async () => {
 <style scoped>
 .page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -130,4 +131,3 @@ h2 {
   justify-content: flex-end;
 }
 </style>
-

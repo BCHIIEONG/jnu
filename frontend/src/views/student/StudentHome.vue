@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob, uploadFormData } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 import UiModeToggle from '../common/UiModeToggle.vue'
+import { useUiStore } from '../../stores/ui'
 
 type TaskVO = {
   id: number
@@ -43,7 +44,11 @@ type ReviewVO = {
 }
 
 const auth = useAuthStore()
+const ui = useUiStore()
 const router = useRouter()
+
+const isMobile = computed(() => ui.effectiveMode === 'mobile')
+const mobilePage = ref<'list' | 'task'>('list')
 
 const tasks = ref<TaskVO[]>([])
 const loadingTasks = ref(false)
@@ -75,7 +80,7 @@ async function loadTasks() {
   loadingTasks.value = true
   try {
     tasks.value = await apiData<TaskVO[]>('/api/tasks', { method: 'GET' }, auth.token)
-    if (tasks.value.length > 0 && selectedTaskId.value === null) {
+    if (!isMobile.value && tasks.value.length > 0 && selectedTaskId.value === null) {
       const first = tasks.value[0]
       if (first) await selectTask(first.id)
     }
@@ -88,6 +93,18 @@ async function selectTask(taskId: number) {
   selectedTaskId.value = taskId
   taskDetail.value = await apiData<TaskVO>(`/api/tasks/${taskId}`, { method: 'GET' }, auth.token)
   await loadMySubmissions()
+}
+
+async function openTaskMobile(taskId: number) {
+  await selectTask(taskId)
+  mobilePage.value = 'task'
+}
+
+function backToListMobile() {
+  mobilePage.value = 'list'
+  selectedTaskId.value = null
+  taskDetail.value = null
+  mySubmissions.value = []
 }
 
 async function loadMySubmissions() {
@@ -242,7 +259,74 @@ onMounted(loadTasks)
         <el-button size="small" @click="logout">退出</el-button>
       </div>
     </el-header>
-    <el-container>
+
+    <el-main v-if="isMobile" class="main">
+      <div v-if="mobilePage === 'list'">
+        <div class="mobileTitle">实验任务</div>
+        <el-card
+          v-for="t in tasks"
+          :key="t.id"
+          shadow="never"
+          class="taskCard"
+          @click="openTaskMobile(t.id)"
+        >
+          <div class="taskRow">
+            <div class="taskName">{{ t.title }}</div>
+            <el-tag size="small">{{ t.status ?? 'OPEN' }}</el-tag>
+          </div>
+          <div class="meta">截止：{{ t.deadlineAt || '-' }}</div>
+        </el-card>
+        <div v-if="loadingTasks" class="meta">加载中...</div>
+        <div v-else-if="tasks.length === 0" class="meta">暂无任务</div>
+      </div>
+
+      <div v-else>
+        <div class="mobileTop">
+          <el-button size="small" @click="backToListMobile">返回任务列表</el-button>
+          <el-button size="small" @click="loadTasks" :loading="loadingTasks">刷新任务</el-button>
+        </div>
+
+        <el-card v-if="taskDetail" class="block" shadow="never">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px">
+              <div style="font-weight: 700">{{ taskDetail.title }}</div>
+              <div class="meta">发布：{{ taskDetail.publisherName || '-' }}</div>
+            </div>
+          </template>
+          <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
+          <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+        </el-card>
+
+        <el-collapse accordion class="block">
+          <el-collapse-item title="提交报告" name="submit">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
+              <el-button type="primary" size="small" :loading="submitting" @click="submit">提交</el-button>
+            </div>
+            <el-input v-model="submitMd" type="textarea" :rows="10" placeholder="Markdown 内容" />
+          </el-collapse-item>
+
+          <el-collapse-item title="我的提交" name="subs">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
+              <el-button size="small" @click="loadMySubmissions" :loading="loadingSubs">刷新</el-button>
+            </div>
+            <el-card v-for="s in mySubmissions" :key="s.id" shadow="never" class="subCard">
+              <div class="taskRow">
+                <div>v{{ s.versionNo }}</div>
+                <div class="meta">{{ s.submittedAt }}</div>
+              </div>
+              <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap">
+                <el-button size="small" @click="viewReview(s.id)">查看批阅</el-button>
+                <el-button size="small" @click="openAttachments(s)">附件</el-button>
+              </div>
+            </el-card>
+            <div v-if="loadingSubs" class="meta">加载中...</div>
+            <div v-else-if="mySubmissions.length === 0" class="meta">暂无提交</div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </el-main>
+
+    <el-container v-else>
       <el-aside width="360px" class="aside">
         <div class="aside-title">实验任务</div>
         <el-table
@@ -353,6 +437,7 @@ onMounted(loadTasks)
 <style scoped>
 .layout {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 .header {
   display: flex;
@@ -391,6 +476,37 @@ onMounted(loadTasks)
 .meta {
   color: #666;
   font-size: 12px;
+}
+.mobileTitle {
+  font-weight: 800;
+  font-size: 18px;
+  margin: 6px 0 10px;
+}
+.taskCard {
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.subCard {
+  margin-bottom: 10px;
+}
+.taskRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.taskName {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobileTop {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
 }
 :deep(.el-table .is-active td) {
   background: #eef6ff !important;

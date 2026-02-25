@@ -78,6 +78,7 @@ function logout() {
 <style scoped>
 .layout {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 .header {
   display: flex;
