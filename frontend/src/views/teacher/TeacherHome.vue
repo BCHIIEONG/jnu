@@ -132,6 +132,7 @@ const staticCode = ref<string | null>(null)
 
 const QR_MODE_KEY = 'labflow.att.qrMode'
 const QR_REFRESH_SECONDS_KEY = 'labflow.att.qrRefreshSeconds'
+const TOKEN_TTL_SECONDS_KEY = 'labflow.att.tokenTtlSeconds'
 type QrMode = 'dynamic' | 'static'
 
 function initialQrMode(): QrMode {
@@ -142,6 +143,17 @@ function initialQrMode(): QrMode {
     // ignore
   }
   return 'dynamic'
+}
+
+function initialTokenTtlSeconds(): number {
+  try {
+    const v = window.localStorage.getItem(TOKEN_TTL_SECONDS_KEY)
+    const n = v ? Number(v) : NaN
+    if (Number.isFinite(n) && n > 0) return Math.floor(n)
+  } catch {
+    // ignore
+  }
+  return 6
 }
 
 function initialRefreshSeconds(): number {
@@ -157,6 +169,7 @@ function initialRefreshSeconds(): number {
 
 const qrMode = ref<QrMode>(initialQrMode())
 const qrRefreshSeconds = ref<number>(initialRefreshSeconds())
+const tokenTtlSecondsInput = ref<number>(initialTokenTtlSeconds())
 
 function normalizeRefreshSeconds(n: number): number {
   const raw = Math.floor(Number(n))
@@ -167,7 +180,15 @@ function normalizeRefreshSeconds(n: number): number {
   return Math.max(min, Math.min(max, raw))
 }
 
-const tokenTtlSeconds = computed(() => tokenInfo.value?.ttlSeconds ?? null)
+function normalizeTokenTtlSeconds(n: number): number {
+  const raw = Math.floor(Number(n))
+  const min = 3
+  const max = 60
+  if (!Number.isFinite(raw)) return 6
+  return Math.max(min, Math.min(max, raw))
+}
+
+const tokenTtlSecondsFromServer = computed(() => tokenInfo.value?.ttlSeconds ?? null)
 const MOBILE_BASE_KEY = 'labflow.mobileBase'
 const lanIps = ref<string[]>([])
 const loadingLanIps = ref(false)
@@ -215,6 +236,23 @@ watch(
 )
 
 watch(
+  tokenTtlSecondsInput,
+  (v) => {
+    const normalized = normalizeTokenTtlSeconds(v)
+    if (normalized !== v) {
+      tokenTtlSecondsInput.value = normalized
+      return
+    }
+    try {
+      window.localStorage.setItem(TOKEN_TTL_SECONDS_KEY, String(normalized))
+    } catch {
+      // ignore
+    }
+  },
+  { flush: 'post' },
+)
+
+watch(
   qrRefreshSeconds,
   (v) => {
     const normalized = normalizeRefreshSeconds(v)
@@ -235,7 +273,7 @@ watch(
 )
 
 watch(
-  tokenTtlSeconds,
+  tokenTtlSecondsFromServer,
   () => {
     if (!session.value) return
     if (qrMode.value !== 'dynamic') return
@@ -595,7 +633,13 @@ async function startSession() {
   try {
     session.value = await apiData<AttendanceSession>(
       `/api/attendance/sessions`,
-      { method: 'POST', body: { scheduleId: selectedCell.value.id } },
+      {
+        method: 'POST',
+        body:
+          qrMode.value === 'dynamic'
+            ? { scheduleId: selectedCell.value.id, tokenTtlSeconds: normalizeTokenTtlSeconds(tokenTtlSecondsInput.value) }
+            : { scheduleId: selectedCell.value.id },
+      },
       auth.token,
     )
     ElMessage.success('签到已开启')
@@ -608,6 +652,25 @@ async function startSession() {
     startLoops()
   } catch (e: any) {
     ElMessage.error(e?.message ?? '开启签到失败')
+  }
+}
+
+async function applyTokenTtl() {
+  if (!session.value) return
+  if (qrMode.value !== 'dynamic') return
+  const ttl = normalizeTokenTtlSeconds(tokenTtlSecondsInput.value)
+  tokenTtlSecondsInput.value = ttl
+  try {
+    await apiData(
+      `/api/attendance/sessions/${session.value.id}/token-ttl`,
+      { method: 'PUT', body: { tokenTtlSeconds: ttl } },
+      auth.token,
+    )
+    ElMessage.success('TTL 已更新')
+    await refreshToken()
+    startLoops()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '更新 TTL 失败')
   }
 }
 
@@ -1017,6 +1080,18 @@ async function copyLink() {
           style="width: 160px"
         />
         <span v-if="qrMode === 'dynamic'" class="meta">秒刷新</span>
+
+        <el-input-number
+          v-if="qrMode === 'dynamic'"
+          v-model="tokenTtlSecondsInput"
+          :min="3"
+          :max="60"
+          :step="1"
+          controls-position="right"
+          style="width: 170px"
+        />
+        <span v-if="qrMode === 'dynamic'" class="meta">TTL 秒</span>
+        <el-button v-if="qrMode === 'dynamic'" size="small" @click="applyTokenTtl" :disabled="!session">应用 TTL</el-button>
 
         <el-button size="small" @click="copyLink" :disabled="!checkinLink">复制签到链接</el-button>
         <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>

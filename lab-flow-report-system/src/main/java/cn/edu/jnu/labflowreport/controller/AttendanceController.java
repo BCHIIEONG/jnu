@@ -4,6 +4,7 @@ import cn.edu.jnu.labflowreport.attendance.dto.AttendanceCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceManualCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceSessionCreateRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceStaticCheckinRequest;
+import cn.edu.jnu.labflowreport.attendance.dto.AttendanceTokenTtlUpdateRequest;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
 import cn.edu.jnu.labflowreport.attendance.service.AttendanceService;
 import cn.edu.jnu.labflowreport.attendance.service.AttendanceTokenService;
@@ -25,6 +26,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -62,7 +64,8 @@ public class AttendanceController {
         AttendanceSessionEntity session = attendanceService.getOpenSessionOrThrow(sessionId);
         // Ensure caller has permission via the records listing check.
         attendanceService.listRecords(actor, sessionId);
-        return ApiResponse.success(tokenService.issueToken(sessionId));
+        int ttl = attendanceService.getSessionTokenTtlSeconds(session);
+        return ApiResponse.success(tokenService.issueToken(sessionId, ttl));
     }
 
     @GetMapping("/sessions/{sessionId}/static-code")
@@ -71,6 +74,16 @@ public class AttendanceController {
         AuthenticatedUser actor = SecurityUtils.currentUser();
         String code = attendanceService.getOrCreateStaticCode(actor, sessionId);
         return ApiResponse.success(new StaticCodeResponse(code));
+    }
+
+    @PutMapping("/sessions/{sessionId}/token-ttl")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<AttendanceSessionVO> updateTokenTtl(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody AttendanceTokenTtlUpdateRequest request
+    ) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("已更新", attendanceService.updateSessionTokenTtl(actor, sessionId, request));
     }
 
     @PostMapping("/checkin")

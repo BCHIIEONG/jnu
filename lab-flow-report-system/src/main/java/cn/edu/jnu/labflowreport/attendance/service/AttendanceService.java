@@ -2,6 +2,7 @@ package cn.edu.jnu.labflowreport.attendance.service;
 
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceManualCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceSessionCreateRequest;
+import cn.edu.jnu.labflowreport.attendance.dto.AttendanceTokenTtlUpdateRequest;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceRecordEntity;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
@@ -24,6 +25,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Base64;
+import java.time.Instant;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,19 +40,22 @@ public class AttendanceService {
     private final CourseScheduleMapper courseScheduleMapper;
     private final SysUserMapper sysUserMapper;
     private final SecureRandom random = new SecureRandom();
+    private final int defaultTokenTtlSeconds;
 
     public AttendanceService(
             AttendanceSessionMapper sessionMapper,
             AttendanceRecordMapper recordMapper,
             AttendanceTokenService tokenService,
             CourseScheduleMapper courseScheduleMapper,
-            SysUserMapper sysUserMapper
+            SysUserMapper sysUserMapper,
+            @Value("${ATT_TOKEN_TTL_SECONDS:6}") int defaultTokenTtlSeconds
     ) {
         this.sessionMapper = sessionMapper;
         this.recordMapper = recordMapper;
         this.tokenService = tokenService;
         this.courseScheduleMapper = courseScheduleMapper;
         this.sysUserMapper = sysUserMapper;
+        this.defaultTokenTtlSeconds = clampTtl(defaultTokenTtlSeconds);
     }
 
     @Transactional
@@ -96,6 +102,7 @@ public class AttendanceService {
         entity.setClassId(classId);
         entity.setTeacherId(teacherId);
         entity.setStatus("OPEN");
+        entity.setTokenTtlSeconds(resolveRequestedTtl(request.tokenTtlSeconds()));
         entity.setStartedAt(LocalDateTime.now());
         entity.setEndedAt(null);
         entity.setCreatedAt(LocalDateTime.now());
@@ -105,6 +112,22 @@ public class AttendanceService {
         AttendanceSessionVO vo = toVo(entity);
         vo.setId(entity.getId());
         return vo;
+    }
+
+    public int getSessionTokenTtlSeconds(AttendanceSessionEntity session) {
+        Integer v = session.getTokenTtlSeconds();
+        return clampTtl(v == null ? defaultTokenTtlSeconds : v);
+    }
+
+    @Transactional
+    public AttendanceSessionVO updateSessionTokenTtl(AuthenticatedUser actor, Long sessionId, AttendanceTokenTtlUpdateRequest request) {
+        AttendanceSessionEntity session = getOpenSessionOrThrow(sessionId);
+        ensureTeacherOrAdmin(actor, session);
+        int ttl = resolveRequestedTtl(request.tokenTtlSeconds());
+        session.setTokenTtlSeconds(ttl);
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionMapper.updateById(session);
+        return toVo(session);
     }
 
     @Transactional
@@ -155,6 +178,13 @@ public class AttendanceService {
 
         AttendanceTokenService.ParsedToken parsed = tokenService.parseAndValidate(token);
         AttendanceSessionEntity session = getOpenSessionOrThrow(parsed.sessionId());
+
+        // Expiry is per-session configurable.
+        long now = Instant.now().getEpochSecond();
+        int ttlSeconds = getSessionTokenTtlSeconds(session);
+        if (now - parsed.issuedAtEpochSec() > ttlSeconds) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
+        }
 
         SysUserEntity me = sysUserMapper.selectById(student.userId());
         if (me == null) {
@@ -347,6 +377,7 @@ public class AttendanceService {
         vo.setClassId(entity.getClassId());
         vo.setTeacherId(entity.getTeacherId());
         vo.setStatus(entity.getStatus());
+        vo.setTokenTtlSeconds(entity.getTokenTtlSeconds());
         vo.setStartedAt(entity.getStartedAt());
         vo.setEndedAt(entity.getEndedAt());
         return vo;
@@ -384,6 +415,21 @@ public class AttendanceService {
         byte[] bytes = new byte[12];
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private int resolveRequestedTtl(Integer requested) {
+        if (requested == null) return defaultTokenTtlSeconds;
+        if (requested < 3 || requested > 60) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "tokenTtlSeconds 必须在 3 到 60 秒之间");
+        }
+        return requested;
+    }
+
+    private int clampTtl(int ttlSeconds) {
+        int v = ttlSeconds;
+        if (v < 3) v = 3;
+        if (v > 60) v = 60;
+        return v;
     }
 
     public record CheckinResult(Long recordId, boolean alreadyCheckedIn, LocalDateTime checkedInAt) {

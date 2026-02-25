@@ -18,23 +18,20 @@ import org.springframework.stereotype.Service;
 public class AttendanceTokenService {
 
     private final String secret;
-    private final int ttlSeconds;
     private final SecureRandom random = new SecureRandom();
 
     public AttendanceTokenService(
             SecurityJwtProperties jwtProps,
-            @Value("${ATT_SECRET:}") String attSecret,
-            @Value("${ATT_TOKEN_TTL_SECONDS:6}") int ttlSeconds
+            @Value("${ATT_SECRET:}") String attSecret
     ) {
         String s = attSecret == null ? "" : attSecret.trim();
         if (s.isEmpty()) {
             s = jwtProps.getSecret();
         }
         this.secret = s;
-        this.ttlSeconds = Math.max(1, ttlSeconds);
     }
 
-    public AttendanceTokenVO issueToken(Long sessionId) {
+    public AttendanceTokenVO issueToken(Long sessionId, int ttlSeconds) {
         long iat = Instant.now().getEpochSecond();
         String nonce = randomNonce();
         String sig = sign(sessionId, iat, nonce);
@@ -43,7 +40,7 @@ public class AttendanceTokenService {
         AttendanceTokenVO vo = new AttendanceTokenVO();
         vo.setToken(token);
         vo.setIssuedAtEpochSec(iat);
-        vo.setTtlSeconds(ttlSeconds);
+        vo.setTtlSeconds(Math.max(1, ttlSeconds));
         return vo;
     }
 
@@ -65,11 +62,6 @@ public class AttendanceTokenService {
             issuedAt = Long.parseLong(parts[2]);
         } catch (NumberFormatException ex) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码 token 格式错误");
-        }
-
-        long now = Instant.now().getEpochSecond();
-        if (now - issuedAt > ttlSeconds) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
         }
 
         String expected = sign(sessionId, issuedAt, nonce);

@@ -18,6 +18,7 @@ public class AttendanceSessionEntity {
     private Long teacherId;
     private String status;
     private String staticCode;
+    private Integer tokenTtlSeconds;
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
     private LocalDateTime createdAt;

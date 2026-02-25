@@ -11,7 +11,7 @@ public class AttendanceSessionVO {
     private Long classId;
     private Long teacherId;
     private String status;
+    private Integer tokenTtlSeconds;
     private LocalDateTime startedAt;
     private LocalDateTime endedAt;
 }
-

@@ -141,7 +141,7 @@ class ScheduleAttendanceIntegrationTests {
         MvcResult session = mockMvc.perform(post("/api/attendance/sessions")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"scheduleId\":" + scheduleId + "}"))
+                        .content("{\"scheduleId\":" + scheduleId + ",\"tokenTtlSeconds\":30}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
@@ -165,20 +165,82 @@ class ScheduleAttendanceIntegrationTests {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.alreadyCheckedIn").value(false));
 
+        // Student cannot update token ttl.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/attendance/sessions/" + sessionId + "/token-ttl")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenTtlSeconds\":60}"))
+                .andExpect(status().isForbidden());
+
         // Student cannot fetch tokens.
         mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
                 .andExpect(status().isForbidden());
 
-        // Teacher fetches token.
+        // Teacher fetches token (ttl from session setting).
         MvcResult tokenRes = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ttlSeconds").value(30))
+                .andReturn();
+
+        // Update ttl to 60 and verify.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/attendance/sessions/" + sessionId + "/token-ttl")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenTtlSeconds\":60}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        tokenRes = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ttlSeconds").value(60))
+                .andReturn();
+
+        // Update ttl to 3 and verify token expires.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/attendance/sessions/" + sessionId + "/token-ttl")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenTtlSeconds\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        tokenRes = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ttlSeconds").value(3))
+                .andReturn();
+        String tokenExpired = JsonPath.read(tokenRes.getResponse().getContentAsString(), "$.data.token");
+
+        Thread.sleep(3500);
+
+        mockMvc.perform(post("/api/attendance/checkin")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + dynToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + tokenExpired + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("二维码已过期")));
+
+        // Set ttl back to 60 and perform a normal dynamic check-in + idempotent re-check-in.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/attendance/sessions/" + sessionId + "/token-ttl")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tokenTtlSeconds\":60}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        tokenRes = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/token")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.ttlSeconds").value(60))
                 .andReturn();
         String token = JsonPath.read(tokenRes.getResponse().getContentAsString(), "$.data.token");
 
-        // Student check-in.
         mockMvc.perform(post("/api/attendance/checkin")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + dynToken)
                         .contentType(MediaType.APPLICATION_JSON)
