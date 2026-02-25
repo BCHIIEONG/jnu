@@ -127,6 +127,45 @@ const loadingRoster = ref(false)
 const session = ref<AttendanceSession | null>(null)
 const tokenInfo = ref<AttendanceTokenVO | null>(null)
 const qrDataUrl = ref<string | null>(null)
+
+const QR_MODE_KEY = 'labflow.att.qrMode'
+const QR_REFRESH_SECONDS_KEY = 'labflow.att.qrRefreshSeconds'
+type QrMode = 'dynamic' | 'static'
+
+function initialQrMode(): QrMode {
+  try {
+    const v = window.localStorage.getItem(QR_MODE_KEY)
+    if (v === 'static' || v === 'dynamic') return v
+  } catch {
+    // ignore
+  }
+  return 'dynamic'
+}
+
+function initialRefreshSeconds(): number {
+  try {
+    const v = window.localStorage.getItem(QR_REFRESH_SECONDS_KEY)
+    const n = v ? Number(v) : NaN
+    if (Number.isFinite(n) && n > 0) return Math.floor(n)
+  } catch {
+    // ignore
+  }
+  return 5
+}
+
+const qrMode = ref<QrMode>(initialQrMode())
+const qrRefreshSeconds = ref<number>(initialRefreshSeconds())
+
+function normalizeRefreshSeconds(n: number): number {
+  const raw = Math.floor(Number(n))
+  const min = 1
+  const maxByTtl = tokenInfo.value?.ttlSeconds ? Math.max(1, tokenInfo.value.ttlSeconds - 1) : 60
+  const max = Math.min(60, maxByTtl)
+  if (!Number.isFinite(raw)) return 5
+  return Math.max(min, Math.min(max, raw))
+}
+
+const tokenTtlSeconds = computed(() => tokenInfo.value?.ttlSeconds ?? null)
 const MOBILE_BASE_KEY = 'labflow.mobileBase'
 const lanIps = ref<string[]>([])
 const loadingLanIps = ref(false)
@@ -150,6 +189,59 @@ watch(
       window.localStorage.setItem(MOBILE_BASE_KEY, (v ?? '').trim())
     } catch {
       // ignore
+    }
+  },
+  { flush: 'post' },
+)
+
+watch(
+  qrMode,
+  (v) => {
+    try {
+      window.localStorage.setItem(QR_MODE_KEY, v)
+    } catch {
+      // ignore
+    }
+    // Apply immediately if a session is open.
+    if (session.value) {
+      startLoops()
+      if (v === 'dynamic') {
+        refreshToken()
+      }
+    }
+  },
+  { flush: 'post' },
+)
+
+watch(
+  qrRefreshSeconds,
+  (v) => {
+    const normalized = normalizeRefreshSeconds(v)
+    if (normalized !== v) {
+      qrRefreshSeconds.value = normalized
+      return
+    }
+    try {
+      window.localStorage.setItem(QR_REFRESH_SECONDS_KEY, String(normalized))
+    } catch {
+      // ignore
+    }
+    if (session.value && qrMode.value === 'dynamic') {
+      startLoops()
+    }
+  },
+  { flush: 'post' },
+)
+
+watch(
+  tokenTtlSeconds,
+  () => {
+    if (!session.value) return
+    if (qrMode.value !== 'dynamic') return
+    const normalized = normalizeRefreshSeconds(qrRefreshSeconds.value)
+    if (normalized !== qrRefreshSeconds.value) {
+      qrRefreshSeconds.value = normalized
+      return
     }
   },
   { flush: 'post' },
@@ -558,7 +650,12 @@ async function refreshRecords() {
 
 function startLoops() {
   stopLoops()
-  tokenTimer = window.setInterval(refreshToken, 5000)
+  // QR refresh
+  if (qrMode.value === 'dynamic') {
+    const seconds = normalizeRefreshSeconds(qrRefreshSeconds.value)
+    qrRefreshSeconds.value = seconds
+    tokenTimer = window.setInterval(refreshToken, seconds * 1000)
+  }
   recordsTimer = window.setInterval(refreshRecords, 2000)
 }
 
@@ -608,6 +705,26 @@ const checkinLink = computed(() => {
   const base = (mobileBase.value ?? '').trim().replace(/\/$/, '')
   return `${base}/m/checkin?t=${encodeURIComponent(t)}`
 })
+
+let qrGenSeq = 0
+watch(
+  checkinLink,
+  async (link) => {
+    if (!session.value) return
+    if (!link) {
+      qrDataUrl.value = null
+      return
+    }
+    const seq = ++qrGenSeq
+    try {
+      const url = await QRCode.toDataURL(link, { width: 220, margin: 1 })
+      if (seq === qrGenSeq) qrDataUrl.value = url
+    } catch {
+      // ignore
+    }
+  },
+  { flush: 'post' },
+)
 
 async function copyLink() {
   const link = checkinLink.value
@@ -852,6 +969,22 @@ async function copyLink() {
         >
           使用推荐IP
         </el-button>
+
+        <el-select v-model="qrMode" placeholder="二维码模式" style="width: 140px">
+          <el-option label="动态" value="dynamic" />
+          <el-option label="静态" value="static" />
+        </el-select>
+        <el-input-number
+          v-if="qrMode === 'dynamic'"
+          v-model="qrRefreshSeconds"
+          :min="1"
+          :max="60"
+          :step="1"
+          controls-position="right"
+          style="width: 160px"
+        />
+        <span v-if="qrMode === 'dynamic'" class="meta">秒刷新</span>
+
         <el-button size="small" @click="copyLink" :disabled="!checkinLink">复制签到链接</el-button>
         <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>
         <el-button size="small" type="primary" @click="startSession" :disabled="!!session">开启签到</el-button>
@@ -863,19 +996,25 @@ async function copyLink() {
       <div v-if="isLocalhostBase(mobileBase)" class="meta" style="margin-top: 6px; color: #b42318">
         当前基址是 localhost，手机扫码会访问到手机自己的 localhost，必定打不开。建议改成电脑局域网 IP。
       </div>
+      <div v-else-if="qrMode === 'dynamic' && tokenInfo?.ttlSeconds" class="meta" style="margin-top: 6px">
+        提示：后端 token TTL = {{ tokenInfo.ttlSeconds }} 秒，建议刷新间隔不要超过 {{ Math.max(1, tokenInfo.ttlSeconds - 1) }} 秒。
+      </div>
 
       <div v-if="session" class="meta" style="margin-top: 6px">
         场次ID：{{ session.id }}，状态：{{ session.status }}，开始：{{ session.startedAt }}
       </div>
 
-      <div v-if="session" style="display: flex; gap: 16px; align-items: flex-start; margin-top: 12px; flex-wrap: wrap">
-        <div>
-          <div class="meta" style="margin-bottom: 6px">动态二维码（每 5 秒刷新）</div>
-          <div class="qr">
-            <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" />
-            <div v-else class="meta">加载中...</div>
+        <div v-if="session" style="display: flex; gap: 16px; align-items: flex-start; margin-top: 12px; flex-wrap: wrap">
+          <div>
+            <div class="meta" style="margin-bottom: 6px">
+              <span v-if="qrMode === 'dynamic'">动态二维码（每 {{ qrRefreshSeconds }} 秒刷新）</span>
+              <span v-else>静态二维码（不自动刷新，可点“刷新二维码”）</span>
+            </div>
+            <div class="qr">
+              <img v-if="qrDataUrl" :src="qrDataUrl" alt="QR" />
+              <div v-else class="meta">加载中...</div>
+            </div>
           </div>
-        </div>
         <div style="flex: 1; min-width: 320px">
           <div class="meta" style="margin-bottom: 6px">签到链接</div>
           <el-input :model-value="checkinLink" readonly />
