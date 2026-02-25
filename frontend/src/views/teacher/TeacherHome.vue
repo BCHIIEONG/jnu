@@ -132,7 +132,6 @@ const staticCode = ref<string | null>(null)
 
 const QR_MODE_KEY = 'labflow.att.qrMode'
 const QR_REFRESH_SECONDS_KEY = 'labflow.att.qrRefreshSeconds'
-const TOKEN_TTL_SECONDS_KEY = 'labflow.att.tokenTtlSeconds'
 type QrMode = 'dynamic' | 'static'
 
 function initialQrMode(): QrMode {
@@ -143,17 +142,6 @@ function initialQrMode(): QrMode {
     // ignore
   }
   return 'dynamic'
-}
-
-function initialTokenTtlSeconds(): number {
-  try {
-    const v = window.localStorage.getItem(TOKEN_TTL_SECONDS_KEY)
-    const n = v ? Number(v) : NaN
-    if (Number.isFinite(n) && n > 0) return Math.floor(n)
-  } catch {
-    // ignore
-  }
-  return 6
 }
 
 function initialRefreshSeconds(): number {
@@ -169,26 +157,22 @@ function initialRefreshSeconds(): number {
 
 const qrMode = ref<QrMode>(initialQrMode())
 const qrRefreshSeconds = ref<number>(initialRefreshSeconds())
-const tokenTtlSecondsInput = ref<number>(initialTokenTtlSeconds())
 
 function normalizeRefreshSeconds(n: number): number {
   const raw = Math.floor(Number(n))
   const min = 1
-  const maxByTtl = tokenInfo.value?.ttlSeconds ? Math.max(1, tokenInfo.value.ttlSeconds - 1) : 60
-  const max = Math.min(60, maxByTtl)
+  const max = 60
   if (!Number.isFinite(raw)) return 5
   return Math.max(min, Math.min(max, raw))
 }
 
-function normalizeTokenTtlSeconds(n: number): number {
-  const raw = Math.floor(Number(n))
-  const min = 3
-  const max = 60
-  if (!Number.isFinite(raw)) return 6
-  return Math.max(min, Math.min(max, raw))
+function desiredTokenTtlSeconds(): number {
+  // Keep a small buffer so that a token stays valid until the next refresh.
+  // ttl = refresh + 1, capped to 60 and bounded to >= 3.
+  const refresh = normalizeRefreshSeconds(qrRefreshSeconds.value)
+  return Math.min(60, Math.max(3, refresh + 1))
 }
 
-const tokenTtlSecondsFromServer = computed(() => tokenInfo.value?.ttlSeconds ?? null)
 const MOBILE_BASE_KEY = 'labflow.mobileBase'
 const lanIps = ref<string[]>([])
 const loadingLanIps = ref(false)
@@ -228,25 +212,12 @@ watch(
     // Apply immediately if a session is open.
     if (session.value) {
       startLoops()
-      if (v === 'dynamic') refreshToken()
+      if (v === 'dynamic') {
+        refreshToken()
+        // Keep backend TTL aligned with current refresh seconds.
+        syncTokenTtl()
+      }
       else refreshStaticCode()
-    }
-  },
-  { flush: 'post' },
-)
-
-watch(
-  tokenTtlSecondsInput,
-  (v) => {
-    const normalized = normalizeTokenTtlSeconds(v)
-    if (normalized !== v) {
-      tokenTtlSecondsInput.value = normalized
-      return
-    }
-    try {
-      window.localStorage.setItem(TOKEN_TTL_SECONDS_KEY, String(normalized))
-    } catch {
-      // ignore
     }
   },
   { flush: 'post' },
@@ -265,26 +236,19 @@ watch(
     } catch {
       // ignore
     }
-    if (session.value && qrMode.value === 'dynamic') {
-      startLoops()
-    }
+    if (session.value && qrMode.value === 'dynamic') syncTokenTtlDebounced()
   },
   { flush: 'post' },
 )
 
-watch(
-  tokenTtlSecondsFromServer,
-  () => {
-    if (!session.value) return
-    if (qrMode.value !== 'dynamic') return
-    const normalized = normalizeRefreshSeconds(qrRefreshSeconds.value)
-    if (normalized !== qrRefreshSeconds.value) {
-      qrRefreshSeconds.value = normalized
-      return
-    }
-  },
-  { flush: 'post' },
-)
+let syncTtlTimer: number | null = null
+function syncTokenTtlDebounced() {
+  if (syncTtlTimer) window.clearTimeout(syncTtlTimer)
+  syncTtlTimer = window.setTimeout(() => {
+    syncTtlTimer = null
+    syncTokenTtl()
+  }, 350)
+}
 
 function isLocalhostBase(value: string): boolean {
   try {
@@ -637,7 +601,7 @@ async function startSession() {
         method: 'POST',
         body:
           qrMode.value === 'dynamic'
-            ? { scheduleId: selectedCell.value.id, tokenTtlSeconds: normalizeTokenTtlSeconds(tokenTtlSecondsInput.value) }
+            ? { scheduleId: selectedCell.value.id, tokenTtlSeconds: desiredTokenTtlSeconds() }
             : { scheduleId: selectedCell.value.id },
       },
       auth.token,
@@ -655,22 +619,26 @@ async function startSession() {
   }
 }
 
-async function applyTokenTtl() {
+async function syncTokenTtl() {
   if (!session.value) return
   if (qrMode.value !== 'dynamic') return
-  const ttl = normalizeTokenTtlSeconds(tokenTtlSecondsInput.value)
-  tokenTtlSecondsInput.value = ttl
+
+  const ttl = desiredTokenTtlSeconds()
+  if (tokenInfo.value?.ttlSeconds === ttl) {
+    startLoops()
+    return
+  }
   try {
     await apiData(
       `/api/attendance/sessions/${session.value.id}/token-ttl`,
       { method: 'PUT', body: { tokenTtlSeconds: ttl } },
       auth.token,
     )
-    ElMessage.success('TTL 已更新')
     await refreshToken()
     startLoops()
   } catch (e: any) {
-    ElMessage.error(e?.message ?? '更新 TTL 失败')
+    // Non-fatal: QR refresh can still work; keep timer alive.
+    startLoops()
   }
 }
 
@@ -753,6 +721,8 @@ function stopLoops() {
   if (recordsTimer) window.clearInterval(recordsTimer)
   tokenTimer = null
   recordsTimer = null
+  if (syncTtlTimer) window.clearTimeout(syncTtlTimer)
+  syncTtlTimer = null
 }
 
 const checkedSet = computed(() => new Set(records.value.map((r) => r.studentId)))
@@ -1081,18 +1051,6 @@ async function copyLink() {
         />
         <span v-if="qrMode === 'dynamic'" class="meta">秒刷新</span>
 
-        <el-input-number
-          v-if="qrMode === 'dynamic'"
-          v-model="tokenTtlSecondsInput"
-          :min="3"
-          :max="60"
-          :step="1"
-          controls-position="right"
-          style="width: 170px"
-        />
-        <span v-if="qrMode === 'dynamic'" class="meta">TTL 秒</span>
-        <el-button v-if="qrMode === 'dynamic'" size="small" @click="applyTokenTtl" :disabled="!session">应用 TTL</el-button>
-
         <el-button size="small" @click="copyLink" :disabled="!checkinLink">复制签到链接</el-button>
         <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>
         <el-button size="small" type="primary" @click="startSession" :disabled="!!session">开启签到</el-button>
@@ -1105,7 +1063,7 @@ async function copyLink() {
         当前基址是 localhost，手机扫码会访问到手机自己的 localhost，必定打不开。建议改成电脑局域网 IP。
       </div>
       <div v-else-if="qrMode === 'dynamic' && tokenInfo?.ttlSeconds" class="meta" style="margin-top: 6px">
-        提示：动态二维码为了“旧码快速失效”，后端 token TTL = {{ tokenInfo.ttlSeconds }} 秒，刷新间隔不要超过 {{ Math.max(1, tokenInfo.ttlSeconds - 1) }} 秒；需要更久请切换“静态”。
+        提示：动态二维码后端 TTL 会自动按“刷新秒数 + 1（最大 60）”设置；需要更久请切换“静态”。当前后端 TTL = {{ tokenInfo.ttlSeconds }} 秒。
       </div>
 
       <div v-if="session" class="meta" style="margin-top: 6px">
