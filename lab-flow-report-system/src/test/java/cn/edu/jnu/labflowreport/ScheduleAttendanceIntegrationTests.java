@@ -59,6 +59,23 @@ class ScheduleAttendanceIntegrationTests {
         Number teacherIdNum = JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items[0].id");
         long teacherId = teacherIdNum.longValue();
 
+        // Create an extra student in the same class who will NOT check in (to verify "not checked in" export rows).
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"student_absent",
+                                  "displayName":"Absent Student",
+                                  "password":"student123",
+                                  "enabled":true,
+                                  "classId":%d,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(classId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
         // Create a time slot.
         MvcResult slot = mockMvc.perform(post("/api/admin/time-slots")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
@@ -161,7 +178,10 @@ class ScheduleAttendanceIntegrationTests {
                     assertTrue((bytes[1] & 0xFF) == 0xBB);
                     assertTrue((bytes[2] & 0xFF) == 0xBF);
                 })
-                .andExpect(content().string(containsString("studentUsername")));
+                .andExpect(content().string(containsString("studentUsername")))
+                .andExpect(content().string(containsString("student_absent")))
+                .andExpect(content().string(containsString("NOT_CHECKED_IN")))
+                .andExpect(content().string(containsString("CHECKED_IN")));
     }
 
     private String login(String username, String password) throws Exception {
@@ -174,4 +194,3 @@ class ScheduleAttendanceIntegrationTests {
         return JsonPath.read(result.getResponse().getContentAsString(), "$.data.token");
     }
 }
-

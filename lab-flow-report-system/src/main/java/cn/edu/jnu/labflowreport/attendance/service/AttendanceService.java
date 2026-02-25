@@ -17,7 +17,11 @@ import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
 import cn.edu.jnu.labflowreport.schedule.mapper.CourseScheduleMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -225,13 +229,45 @@ public class AttendanceService {
     public String exportRecordsCsv(AuthenticatedUser actor, Long sessionId) {
         AttendanceSessionEntity session = getSessionOrThrow(sessionId);
         ensureTeacherOrAdmin(actor, session);
-        List<AttendanceRecordVO> rows = recordMapper.findRecordsBySessionId(sessionId);
+        List<SysUserEntity> roster = sysUserMapper.findStudentsByClassId(session.getClassId());
+        List<AttendanceRecordVO> records = recordMapper.findRecordsBySessionId(sessionId);
+
+        Map<Long, AttendanceRecordVO> recordByStudentId = new HashMap<>();
+        for (AttendanceRecordVO r : records) {
+            if (r.getStudentId() != null) {
+                recordByStudentId.put(r.getStudentId(), r);
+            }
+        }
+
+        Set<Long> rosterIds = new HashSet<>();
+        for (SysUserEntity u : roster) {
+            if (u.getId() != null) {
+                rosterIds.add(u.getId());
+            }
+        }
 
         StringBuilder csv = new StringBuilder();
-        csv.append("studentUsername,studentDisplayName,method,checkedInAt\n");
-        for (AttendanceRecordVO r : rows) {
+        csv.append("studentUsername,studentDisplayName,status,method,checkedInAt\n");
+
+        // Export full roster: who checked in and who did not.
+        for (SysUserEntity u : roster) {
+            AttendanceRecordVO r = recordByStudentId.get(u.getId());
+            boolean checkedIn = r != null;
+            csv.append(csvCell(u.getUsername())).append(",");
+            csv.append(csvCell(u.getDisplayName())).append(",");
+            csv.append(csvCell(checkedIn ? "CHECKED_IN" : "NOT_CHECKED_IN")).append(",");
+            csv.append(csvCell(checkedIn ? r.getMethod() : "")).append(",");
+            csv.append(csvCell(checkedIn ? r.getCheckedInAt() : "")).append("\n");
+        }
+
+        // Safety: if a record exists for a user not in current roster (e.g., disabled later), still include it.
+        for (AttendanceRecordVO r : records) {
+            if (r.getStudentId() == null) continue;
+            if (rosterIds.contains(r.getStudentId())) continue;
+
             csv.append(csvCell(r.getStudentUsername())).append(",");
             csv.append(csvCell(r.getStudentDisplayName())).append(",");
+            csv.append(csvCell("CHECKED_IN")).append(",");
             csv.append(csvCell(r.getMethod())).append(",");
             csv.append(csvCell(r.getCheckedInAt())).append("\n");
         }
@@ -270,4 +306,3 @@ public class AttendanceService {
     public record CheckinResult(Long recordId, boolean alreadyCheckedIn, LocalDateTime checkedInAt) {
     }
 }
-

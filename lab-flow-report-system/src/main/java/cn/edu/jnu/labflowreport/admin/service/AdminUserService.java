@@ -168,14 +168,14 @@ public class AdminUserService {
         sysUserMapper.insert(entity);
 
         setUserRolesInternal(entity.getId(), request.roleCodes());
-        adminAuditService.record(actor, AdminAuditActions.USER_CREATE, "sys_user", entity.getId(), Map.of(
-                "username", entity.getUsername(),
-                "displayName", entity.getDisplayName(),
-                "enabled", entity.getEnabled(),
-                "departmentId", entity.getDepartmentId(),
-                "classId", entity.getClassId(),
-                "roleCodes", request.roleCodes()
-        ));
+        Map<String, Object> detail = new HashMap<>();
+        detail.put("username", entity.getUsername());
+        detail.put("displayName", entity.getDisplayName());
+        detail.put("enabled", entity.getEnabled());
+        detail.put("departmentId", entity.getDepartmentId());
+        detail.put("classId", entity.getClassId());
+        detail.put("roleCodes", request.roleCodes());
+        adminAuditService.record(actor, AdminAuditActions.USER_CREATE, "sys_user", entity.getId(), detail);
 
         return getUser(entity.getId());
     }
