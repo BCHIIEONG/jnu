@@ -127,7 +127,83 @@ const loadingRoster = ref(false)
 const session = ref<AttendanceSession | null>(null)
 const tokenInfo = ref<AttendanceTokenVO | null>(null)
 const qrDataUrl = ref<string | null>(null)
-const mobileBase = ref<string>((import.meta.env.VITE_MOBILE_BASE_URL as string | undefined) ?? window.location.origin)
+const MOBILE_BASE_KEY = 'labflow.mobileBase'
+const lanIps = ref<string[]>([])
+const loadingLanIps = ref(false)
+
+function initialMobileBase(): string {
+  try {
+    const saved = window.localStorage.getItem(MOBILE_BASE_KEY)
+    if (saved && saved.trim()) return saved.trim()
+  } catch {
+    // ignore
+  }
+  return (import.meta.env.VITE_MOBILE_BASE_URL as string | undefined) ?? window.location.origin
+}
+
+const mobileBase = ref<string>(initialMobileBase())
+
+watch(
+  mobileBase,
+  (v) => {
+    try {
+      window.localStorage.setItem(MOBILE_BASE_KEY, (v ?? '').trim())
+    } catch {
+      // ignore
+    }
+  },
+  { flush: 'post' },
+)
+
+function isLocalhostBase(value: string): boolean {
+  try {
+    const u = new URL(value)
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1'
+  } catch {
+    return false
+  }
+}
+
+function buildBaseForIp(ip: string): string {
+  const protocol = window.location.protocol || 'http:'
+  const port = window.location.port ? `:${window.location.port}` : ''
+  return `${protocol}//${ip}${port}`
+}
+
+function useRecommendedMobileBase() {
+  const ip = lanIps.value[0]
+  if (!ip) return
+  mobileBase.value = buildBaseForIp(ip)
+}
+
+async function loadLanIps() {
+  if (loadingLanIps.value) return
+  loadingLanIps.value = true
+  try {
+    const payload = await apiData<{ ips: string[]; recommended?: string | null }>(
+      '/api/ping/lan-ips',
+      { method: 'GET' },
+      auth.token,
+    )
+    lanIps.value = payload.ips ?? []
+
+    // If current is localhost and user never set a base, auto-fill from recommended IP.
+    let saved: string | null = null
+    try {
+      saved = window.localStorage.getItem(MOBILE_BASE_KEY)
+    } catch {
+      saved = null
+    }
+
+    if ((!saved || !saved.trim()) && isLocalhostBase(mobileBase.value) && payload.recommended) {
+      mobileBase.value = buildBaseForIp(payload.recommended)
+    }
+  } catch {
+    // optional helper; ignore failures
+  } finally {
+    loadingLanIps.value = false
+  }
+}
 
 const records = ref<AttendanceRecord[]>([])
 const loadingRecords = ref(false)
@@ -394,6 +470,7 @@ function nextWeek() {
 async function openClass(item: WeekScheduleItem) {
   selectedCell.value = item
   classDialog.value = true
+  await loadLanIps()
   stopLoops()
   session.value = null
   tokenInfo.value = null
@@ -767,12 +844,24 @@ async function copyLink() {
     <el-card shadow="never" style="margin-bottom: 12px">
       <div class="toolbar">
         <el-input v-model="mobileBase" placeholder="手机端访问基址（建议填电脑局域网IP）" style="width: 360px" />
+        <el-button
+          v-if="lanIps.length > 0 && isLocalhostBase(mobileBase)"
+          size="small"
+          :loading="loadingLanIps"
+          @click="useRecommendedMobileBase"
+        >
+          使用推荐IP
+        </el-button>
         <el-button size="small" @click="copyLink" :disabled="!checkinLink">复制签到链接</el-button>
         <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>
         <el-button size="small" type="primary" @click="startSession" :disabled="!!session">开启签到</el-button>
         <el-button size="small" type="danger" @click="closeSession" :disabled="!session">结束签到</el-button>
         <el-button size="small" @click="refreshToken" :disabled="!session">刷新二维码</el-button>
         <el-button size="small" @click="refreshRecords" :disabled="!session">刷新名单</el-button>
+      </div>
+
+      <div v-if="isLocalhostBase(mobileBase)" class="meta" style="margin-top: 6px; color: #b42318">
+        当前基址是 localhost，手机扫码会访问到手机自己的 localhost，必定打不开。建议改成电脑局域网 IP。
       </div>
 
       <div v-if="session" class="meta" style="margin-top: 6px">

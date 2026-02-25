@@ -72,6 +72,8 @@ const loadingAttachments = ref(false)
 const uploading = ref(false)
 const uploadFile = ref<File | null>(null)
 
+const latestSubmission = computed(() => (mySubmissions.value.length > 0 ? mySubmissions.value[0]! : null))
+
 const previewDialog = ref(false)
 const previewUrl = ref<string | null>(null)
 const previewTitle = ref('')
@@ -206,6 +208,16 @@ async function uploadAttachment() {
   }
 }
 
+async function uploadAttachmentLatest() {
+  const latest = latestSubmission.value
+  if (!latest) {
+    ElMessage.warning('请先提交一次报告后再上传附件')
+    return
+  }
+  attachTarget.value = latest
+  await uploadAttachment()
+}
+
 async function downloadAttachment(row: AttachmentVO) {
   try {
     await downloadBlob(`/api/attachments/${row.id}/download`, {
@@ -297,13 +309,23 @@ onMounted(loadTasks)
           <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
         </el-card>
 
-        <el-collapse accordion class="block">
-          <el-collapse-item title="提交报告" name="submit">
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
-              <el-button type="primary" size="small" :loading="submitting" @click="submit">提交</el-button>
-            </div>
-            <el-input v-model="submitMd" type="textarea" :rows="10" placeholder="Markdown 内容" />
-          </el-collapse-item>
+          <el-collapse accordion class="block">
+            <el-collapse-item title="提交报告" name="submit">
+              <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
+                <el-button type="primary" size="small" :loading="submitting" @click="submit">提交</el-button>
+              </div>
+              <el-input v-model="submitMd" type="textarea" :rows="10" placeholder="Markdown 内容" />
+              <div style="margin-top: 10px">
+                <div class="meta" style="margin-bottom: 6px">附件（上传到最新一次提交）</div>
+                <div v-if="!latestSubmission" class="meta">请先提交一次报告，再上传附件。</div>
+                <div v-else style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                  <input type="file" @change="onPickFile" />
+                  <el-button type="primary" size="small" :loading="uploading" @click="uploadAttachmentLatest">上传附件</el-button>
+                  <el-button size="small" @click="openAttachments(latestSubmission)">管理/预览</el-button>
+                  <div class="meta">当前：v{{ latestSubmission.versionNo }}（ID: {{ latestSubmission.id }}）</div>
+                </div>
+              </div>
+            </el-collapse-item>
 
           <el-collapse-item title="我的提交" name="subs">
             <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
@@ -361,6 +383,16 @@ onMounted(loadTasks)
             </div>
           </template>
           <el-input v-model="submitMd" type="textarea" :rows="8" placeholder="Markdown 内容" />
+          <div style="margin-top: 10px">
+            <div class="meta" style="margin-bottom: 6px">附件（上传到最新一次提交）</div>
+            <div v-if="!latestSubmission" class="meta">请先提交一次报告，再上传附件。</div>
+            <div v-else style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+              <input type="file" @change="onPickFile" />
+              <el-button type="primary" size="small" :loading="uploading" @click="uploadAttachmentLatest">上传附件</el-button>
+              <el-button size="small" @click="openAttachments(latestSubmission)">管理/预览</el-button>
+              <div class="meta">当前：v{{ latestSubmission.versionNo }}（ID: {{ latestSubmission.id }}）</div>
+            </div>
+          </div>
         </el-card>
 
         <el-card class="block" shadow="never" v-if="selectedTaskId">
