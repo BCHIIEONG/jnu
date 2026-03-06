@@ -97,7 +97,27 @@ class AdminIntegrationTests {
 
         login(username, "Abc12345");
 
-        // Disable user
+        String renamedUsername = username + "_renamed";
+
+        // Update username/displayName
+        mockMvc.perform(put("/api/admin/users/" + userId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"测试用户已改名",
+                                  "enabled":true
+                                }
+                                """.formatted(renamedUsername)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.username").value(renamedUsername))
+                .andExpect(jsonPath("$.data.displayName").value("测试用户已改名"));
+
+        login(renamedUsername, "Abc12345");
+
         mockMvc.perform(put("/api/admin/users/" + userId)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -105,6 +125,13 @@ class AdminIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.enabled").value(false));
+
+        mockMvc.perform(put("/api/admin/users/" + userId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"teacher\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40000));
 
         // Audit log should contain at least one USER_CREATE entry
         mockMvc.perform(get("/api/admin/audit-logs")

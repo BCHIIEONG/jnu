@@ -1,6 +1,7 @@
 package cn.edu.jnu.labflowreport.schedule.mapper;
 
 import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
+import cn.edu.jnu.labflowreport.schedule.vo.TeacherClassVO;
 import cn.edu.jnu.labflowreport.schedule.vo.CourseScheduleVO;
 import cn.edu.jnu.labflowreport.schedule.vo.TeacherWeekScheduleItemVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -85,4 +86,16 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
             @Param("from") LocalDate from,
             @Param("to") LocalDate to
     );
+
+    @Select("""
+            SELECT DISTINCT c.id,
+                            c.name,
+                            d.name AS department_name
+            FROM course_schedule cs
+            JOIN org_class c ON c.id = cs.class_id
+            LEFT JOIN org_department d ON d.id = c.department_id
+            WHERE cs.teacher_id = #{teacherId}
+            ORDER BY d.name ASC, c.name ASC, c.id ASC
+            """)
+    List<TeacherClassVO> findDistinctClassesForTeacher(@Param("teacherId") Long teacherId);
 }

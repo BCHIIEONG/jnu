@@ -221,6 +221,19 @@ public class ScheduleService {
         return courseScheduleMapper.findTeacherWeek(teacherId, semesterId, from, to);
     }
 
+    public List<CourseScheduleVO> listStudentWeek(Long userId, Long semesterId, LocalDate weekStartDate) {
+        SysUserEntity user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已失效");
+        }
+        if (user.getClassId() == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "当前账号未绑定班级");
+        }
+        LocalDate from = weekStartDate;
+        LocalDate to = weekStartDate.plusDays(6);
+        return courseScheduleMapper.findSchedules(semesterId, from, to, null, user.getClassId());
+    }
+
     private void createCourseSchedulePrecheck(AdminCourseScheduleRequest request) {
         if (semesterMapper.selectById(request.semesterId()) == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "semesterId 不存在");
@@ -271,4 +284,3 @@ public class ScheduleService {
         }
     }
 }
-

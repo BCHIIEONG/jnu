@@ -284,6 +284,150 @@ class ScheduleAttendanceIntegrationTests {
                 .andExpect(content().string(containsString("CHECKED_IN")));
     }
 
+    @Test
+    void studentWeekScheduleShouldBeClassScoped() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+        String studentToken = login("student", "student123");
+
+        MvcResult semesters = mockMvc.perform(get("/api/admin/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        long semesterId = ((Number) JsonPath.read(semesters.getResponse().getContentAsString(), "$.data[0].id")).longValue();
+
+        MvcResult teacherUsers = mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .param("q", "teacher")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long teacherId = ((Number) JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items[0].id")).longValue();
+
+        MvcResult studentUsers = mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .param("q", "student")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long studentClassId = ((Number) JsonPath.read(studentUsers.getResponse().getContentAsString(), "$.data.items[0].classId")).longValue();
+
+        mockMvc.perform(post("/api/admin/classes")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"departmentId":1,"name":"学生课表测试班"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        MvcResult classes = mockMvc.perform(get("/api/admin/classes")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        int classCount = JsonPath.read(classes.getResponse().getContentAsString(), "$.data.length()");
+        long otherClassId = ((Number) JsonPath.read(classes.getResponse().getContentAsString(), "$.data[" + (classCount - 1) + "].id")).longValue();
+
+        mockMvc.perform(post("/api/admin/time-slots")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"TS-STU","name":"学生课表节次","startTime":"10:00","endTime":"11:40"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        MvcResult slots = mockMvc.perform(get("/api/admin/time-slots")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        int slotCount = JsonPath.read(slots.getResponse().getContentAsString(), "$.data.length()");
+        long slotId = ((Number) JsonPath.read(slots.getResponse().getContentAsString(), "$.data[" + (slotCount - 1) + "].id")).longValue();
+
+        mockMvc.perform(post("/api/admin/course-schedules")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "semesterId":%d,
+                                  "classId":%d,
+                                  "teacherId":%d,
+                                  "lessonDate":"2026-02-24",
+                                  "slotId":%d,
+                                  "courseName":"学生本人课表"
+                                }
+                                """.formatted(semesterId, studentClassId, teacherId, slotId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/api/admin/course-schedules")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "semesterId":%d,
+                                  "classId":%d,
+                                  "teacherId":%d,
+                                  "lessonDate":"2026-02-25",
+                                  "slotId":%d,
+                                  "courseName":"其他班级课表"
+                                }
+                                """.formatted(semesterId, otherClassId, teacherId, slotId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/student/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/student/time-slots")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .param("semesterId", String.valueOf(semesterId))
+                        .param("weekStartDate", "2026-02-24"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(content().string(containsString("学生本人课表")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("其他班级课表"))));
+
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .param("semesterId", String.valueOf(semesterId))
+                        .param("weekStartDate", "2026-02-24"))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"student_noclass",
+                                  "displayName":"No Class Student",
+                                  "password":"student123",
+                                  "enabled":true,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        String noClassToken = login("student_noclass", "student123");
+
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + noClassToken)
+                        .param("semesterId", String.valueOf(semesterId))
+                        .param("weekStartDate", "2026-02-24"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("当前账号未绑定班级")));
+    }
+
     private String login(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

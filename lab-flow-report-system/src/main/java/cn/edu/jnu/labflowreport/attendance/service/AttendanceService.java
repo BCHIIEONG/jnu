@@ -182,7 +182,7 @@ public class AttendanceService {
         // Expiry is per-session configurable.
         long now = Instant.now().getEpochSecond();
         int ttlSeconds = getSessionTokenTtlSeconds(session);
-        if (now - parsed.issuedAtEpochSec() > ttlSeconds) {
+        if (now - parsed.issuedAtEpochSec() >= ttlSeconds) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
         }
 

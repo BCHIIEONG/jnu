@@ -4,7 +4,10 @@ import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportAttachmentEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ReportSubmissionEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportAttachmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
 import cn.edu.jnu.labflowreport.storage.FileStorageService;
 import cn.edu.jnu.labflowreport.workflow.vo.AttachmentVO;
@@ -12,6 +15,7 @@ import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,15 +27,18 @@ public class ReportAttachmentService {
     private final ReportSubmissionMapper submissionMapper;
     private final ReportAttachmentMapper attachmentMapper;
     private final FileStorageService storageService;
+    private final ExpTaskMapper expTaskMapper;
 
     public ReportAttachmentService(
             ReportSubmissionMapper submissionMapper,
             ReportAttachmentMapper attachmentMapper,
-            FileStorageService storageService
+            FileStorageService storageService,
+            ExpTaskMapper expTaskMapper
     ) {
         this.submissionMapper = submissionMapper;
         this.attachmentMapper = attachmentMapper;
         this.storageService = storageService;
+        this.expTaskMapper = expTaskMapper;
     }
 
     public List<AttachmentVO> listAttachments(Long submissionId, AuthenticatedUser user) {
@@ -49,20 +56,50 @@ public class ReportAttachmentService {
         }
         ensureOwner(submissionId, user);
 
-        String filePath = storageService.saveReportAttachment(submissionId, file);
+        // Attachment upload policy:
+        // - If task has deadlineAt: only allow before or equal deadline
+        // - Else: only allow when task status is OPEN
+        ReportSubmissionEntity submission = submissionMapper.selectById(submissionId);
+        if (submission == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "提交记录不存在");
+        }
+        ExpTaskEntity task = expTaskMapper.selectById(submission.getTaskId());
+        if (task == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务不存在");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (task.getDeadlineAt() != null) {
+            if (now.isAfter(task.getDeadlineAt())) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "已超过截止时间，无法上传附件");
+            }
+        } else {
+            if (!"OPEN".equalsIgnoreCase(task.getStatus())) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务已关闭，无法上传附件");
+            }
+        }
+
+        FileStorageService.SaveResult saved = storageService.saveReportAttachmentWithSha256(submissionId, file);
 
         ReportAttachmentEntity entity = new ReportAttachmentEntity();
         entity.setSubmissionId(submissionId);
         entity.setFileName(Objects.toString(file.getOriginalFilename(), "attachment"));
-        entity.setFilePath(filePath);
+        entity.setFilePath(saved.relativePath());
         entity.setFileSize(file.getSize());
         entity.setContentType(file.getContentType());
+        entity.setFileSha256(saved.sha256Hex());
         entity.setUploadedAt(LocalDateTime.now());
         attachmentMapper.insert(entity);
 
         AttachmentVO vo = toVo(entity);
         vo.setId(entity.getId());
         return vo;
+    }
+
+    public Set<String> listAttachmentSha256ForSubmission(Long submissionId) {
+        return attachmentMapper.findBySubmissionId(submissionId).stream()
+                .map(ReportAttachmentEntity::getFileSha256)
+                .filter(s -> s != null && !s.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
     }
 
     public DownloadData downloadAttachment(Long attachmentId, AuthenticatedUser user) {
@@ -115,4 +152,3 @@ public class ReportAttachmentService {
     public record DownloadData(String filename, String contentType, byte[] bytes) {
     }
 }
-

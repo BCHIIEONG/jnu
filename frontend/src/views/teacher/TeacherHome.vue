@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 import UiModeToggle from '../common/UiModeToggle.vue'
 import { useUiStore } from '../../stores/ui'
 import QRCode from 'qrcode'
+import PlagiarismSummaryPanel from './components/PlagiarismSummaryPanel.vue'
 
 type TaskVO = {
   id: number
@@ -71,6 +72,7 @@ type AttendanceRecord = {
 }
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
 type AttendanceStaticCodeVO = { code: string }
+type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -88,12 +90,27 @@ const taskDetail = ref<TaskVO | null>(null)
 const submissions = ref<SubmissionVO[]>([])
 const loadingSubs = ref(false)
 
+type SubmissionGroup = {
+  key: string
+  studentUsername: string
+  studentDisplayName: string
+  latest: SubmissionVO
+  versions: SubmissionVO[]
+}
+
+const submissionQ = ref('')
+
 const createDialog = ref(false)
 const createForm = reactive({
   title: '',
   description: '',
+  deadlineAt: null as string | null,
+  classIds: [] as number[],
 })
 const creating = ref(false)
+const classScope = ref<'mine' | 'all'>('mine')
+const classOptions = ref<TeacherClassVO[]>([])
+const loadingClasses = ref(false)
 
 const reviewDialog = ref(false)
 const reviewTarget = ref<SubmissionVO | null>(null)
@@ -111,6 +128,8 @@ const loadingAttachments = ref(false)
 const previewDialog = ref(false)
 const previewUrl = ref<string | null>(null)
 const previewTitle = ref('')
+const previewKind = ref<'image' | 'text'>('image')
+const previewText = ref<string>('')
 
 // Schedule/attendance state
 const semesters = ref<Semester[]>([])
@@ -306,6 +325,65 @@ const loadingRecords = ref(false)
 let tokenTimer: number | null = null
 let recordsTimer: number | null = null
 
+function parseTime(s: string | undefined | null): number {
+  if (!s) return 0
+  const t = Date.parse(s)
+  return Number.isFinite(t) ? t : 0
+}
+
+const submissionGroups = computed<SubmissionGroup[]>(() => {
+  const by = new Map<string, SubmissionGroup>()
+  for (const s of submissions.value) {
+    if (!s) continue
+    const key = (s.studentUsername || '').trim() || `sid:${s.id}`
+    const g = by.get(key)
+    if (!g) {
+      by.set(key, {
+        key,
+        studentUsername: s.studentUsername,
+        studentDisplayName: s.studentDisplayName,
+        latest: s,
+        versions: [s],
+      })
+      continue
+    }
+    g.versions.push(s)
+    // pick latest: prefer higher version; if tie, later submittedAt
+    const a = g.latest
+    const aVer = Number(a.versionNo || 0)
+    const bVer = Number(s.versionNo || 0)
+    if (bVer > aVer) {
+      g.latest = s
+    } else if (bVer === aVer) {
+      if (parseTime(s.submittedAt) > parseTime(a.submittedAt)) g.latest = s
+    }
+  }
+
+  const groups = Array.from(by.values())
+  for (const g of groups) {
+    g.versions.sort((x, y) => {
+      const vx = Number(x.versionNo || 0)
+      const vy = Number(y.versionNo || 0)
+      if (vy !== vx) return vy - vx
+      return parseTime(y.submittedAt) - parseTime(x.submittedAt)
+    })
+    g.latest = g.versions[0]!
+  }
+
+  groups.sort((a, b) => parseTime(b.latest.submittedAt) - parseTime(a.latest.submittedAt))
+  return groups
+})
+
+const filteredSubmissionGroups = computed(() => {
+  const q = (submissionQ.value || '').trim().toLowerCase()
+  if (!q) return submissionGroups.value
+  return submissionGroups.value.filter((g) => {
+    const a = (g.studentDisplayName || '').toLowerCase()
+    const b = (g.studentUsername || '').toLowerCase()
+    return a.includes(q) || b.includes(q)
+  })
+})
+
 function logout() {
   auth.logout()
   router.replace('/login')
@@ -351,11 +429,25 @@ async function createTask() {
   }
   creating.value = true
   try {
-    await apiData('/api/tasks', { method: 'POST', body: { title: createForm.title, description: createForm.description } }, auth.token)
+    await apiData(
+      '/api/tasks',
+      {
+        method: 'POST',
+        body: {
+          title: createForm.title,
+          description: createForm.description,
+          deadlineAt: createForm.deadlineAt,
+          classIds: createForm.classIds,
+        },
+      },
+      auth.token,
+    )
     ElMessage.success('任务创建成功')
     createDialog.value = false
     createForm.title = ''
     createForm.description = ''
+    createForm.deadlineAt = null
+    createForm.classIds = []
     await loadTasks()
   } catch (e: any) {
     ElMessage.error(e?.message ?? '创建失败')
@@ -363,6 +455,36 @@ async function createTask() {
     creating.value = false
   }
 }
+
+async function loadClassOptions() {
+  loadingClasses.value = true
+  try {
+    classOptions.value = await apiData<TeacherClassVO[]>(
+      `/api/teacher/classes?scope=${classScope.value}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    classOptions.value = []
+    ElMessage.error(e?.message ?? '加载班级列表失败')
+  } finally {
+    loadingClasses.value = false
+  }
+}
+
+watch(
+  () => createDialog.value,
+  async (open) => {
+    if (!open) return
+    await loadClassOptions()
+  },
+)
+
+watch(classScope, async () => {
+  if (!createDialog.value) return
+  createForm.classIds = []
+  await loadClassOptions()
+})
 
 function openReview(row: SubmissionVO) {
   reviewTarget.value = row
@@ -419,21 +541,46 @@ function closePreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
   previewTitle.value = ''
+  previewText.value = ''
   previewDialog.value = false
 }
 
 async function previewAttachment(row: AttachmentVO) {
-  const ct = row.contentType ?? ''
-  if (!ct.startsWith('image/')) {
-    ElMessage.info('暂只支持图片在线预览，请下载查看')
-    return
-  }
   try {
     closePreview()
-    const { blob } = await fetchBlob(`/api/attachments/${row.id}/download`, { token: auth.token })
-    previewUrl.value = URL.createObjectURL(blob)
-    previewTitle.value = row.fileName
-    previewDialog.value = true
+    const { blob, contentType } = await fetchBlob(`/api/attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
   } catch (e: any) {
     ElMessage.error(e?.message ?? '预览失败')
   }
@@ -469,6 +616,39 @@ async function exportCsv() {
   } catch (e: any) {
     ElMessage.error(e?.message ?? '导出失败')
   }
+}
+
+async function setTaskStatus(status: 'OPEN' | 'CLOSED') {
+  if (!taskDetail.value) return
+  try {
+    await apiData(
+      `/api/tasks/${taskDetail.value.id}/status`,
+      { method: 'PUT', body: { status } },
+      auth.token,
+    )
+    ElMessage.success(status === 'OPEN' ? '任务已重新开放' : '任务已关闭')
+    await loadTasks()
+    if (selectedTaskId.value) {
+      await selectTask(selectedTaskId.value)
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '更新任务状态失败')
+  }
+}
+
+async function confirmSetTaskStatus(status: 'OPEN' | 'CLOSED') {
+  if (!taskDetail.value) return
+  const isClose = status === 'CLOSED'
+  try {
+    await ElMessageBox.confirm(
+      isClose ? '关闭后学生将无法继续提交新版本报告，确定要关闭任务吗？' : '确定要重新开放任务吗？',
+      isClose ? '确认关闭' : '确认开放',
+      { type: isClose ? 'warning' : 'info', confirmButtonText: '确定', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  await setTaskStatus(status)
 }
 
 onMounted(loadTasks)
@@ -851,10 +1031,31 @@ async function copyLink() {
             <el-card v-if="taskDetail" class="block" shadow="never">
               <template #header>
                 <div style="display: flex; justify-content: space-between; align-items: center">
-                  <div>{{ taskDetail.title }}</div>
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+                    <div>{{ taskDetail.title }}</div>
+                    <el-tag v-if="taskDetail.status" :type="taskDetail.status === 'OPEN' ? 'success' : 'info'">
+                      {{ taskDetail.status }}
+                    </el-tag>
+                  </div>
                   <div>
                     <el-button size="small" @click="loadSubmissions" :loading="loadingSubs">刷新提交</el-button>
                     <el-button type="primary" size="small" @click="exportCsv">导出 CSV</el-button>
+                    <el-button
+                      v-if="taskDetail.status === 'OPEN'"
+                      type="danger"
+                      size="small"
+                      @click="confirmSetTaskStatus('CLOSED')"
+                    >
+                      关闭任务
+                    </el-button>
+                    <el-button
+                      v-else-if="taskDetail.status === 'CLOSED'"
+                      type="success"
+                      size="small"
+                      @click="confirmSetTaskStatus('OPEN')"
+                    >
+                      重新开放
+                    </el-button>
                   </div>
                 </div>
               </template>
@@ -869,17 +1070,115 @@ async function copyLink() {
                   <div class="meta">点击“批阅”对提交打分</div>
                 </div>
               </template>
-              <el-table :data="submissions" size="small" v-loading="loadingSubs">
-                <el-table-column prop="studentDisplayName" label="学生" min-width="120" />
-                <el-table-column prop="versionNo" label="版本" width="80" />
-                <el-table-column prop="submittedAt" label="提交时间" min-width="180" />
-                <el-table-column label="操作" width="220">
-                  <template #default="{ row }: { row: SubmissionVO }">
-                    <el-button size="small" @click="openReport(row)">查看报告</el-button>
-                    <el-button size="small" type="primary" @click="openReview(row)">批阅</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
+
+              <template v-if="!isMobile">
+                <div class="groupBar">
+                  <el-input
+                    v-model="submissionQ"
+                    placeholder="搜索学生姓名/账号"
+                    clearable
+                    style="width: 280px"
+                  />
+                  <div class="meta">共 {{ filteredSubmissionGroups.length }} 人（{{ submissions.length }} 条提交）</div>
+                </div>
+
+                <el-table
+                  :data="filteredSubmissionGroups"
+                  size="small"
+                  v-loading="loadingSubs"
+                  row-key="key"
+                  class="groupTable"
+                >
+                  <el-table-column type="expand" width="48">
+                    <template #default="{ row }">
+                      <div class="expandBox">
+                        <div class="meta" style="margin-bottom: 6px">全部版本（按版本号倒序）</div>
+                        <el-table :data="row.versions" size="small" border>
+                          <el-table-column prop="versionNo" label="版本" width="80" />
+                          <el-table-column prop="submittedAt" label="提交时间" min-width="180" />
+                          <el-table-column label="操作" width="220">
+                            <template #default="{ row: s }: { row: SubmissionVO }">
+                              <el-button size="small" @click="openReport(s)">查看报告</el-button>
+                              <el-button size="small" type="primary" @click="openReview(s)">批阅</el-button>
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                    </template>
+                  </el-table-column>
+
+                  <el-table-column label="学生" min-width="180">
+                    <template #default="{ row }">
+                      <div style="font-weight: 700">{{ row.studentDisplayName }}</div>
+                      <div class="meta">{{ row.studentUsername }}</div>
+                    </template>
+                  </el-table-column>
+
+                  <el-table-column label="最新版本" width="120">
+                    <template #default="{ row }">
+                      <el-tag size="small" type="info">v{{ row.latest.versionNo }}</el-tag>
+                    </template>
+                  </el-table-column>
+
+                  <el-table-column label="最近提交" min-width="180">
+                    <template #default="{ row }">
+                      {{ row.latest.submittedAt }}
+                    </template>
+                  </el-table-column>
+
+                  <el-table-column label="版本数" width="90">
+                    <template #default="{ row }">
+                      <el-tag size="small" type="success">{{ row.versions.length }}</el-tag>
+                    </template>
+                  </el-table-column>
+
+                  <el-table-column label="操作" width="220">
+                    <template #default="{ row }">
+                      <el-button size="small" @click="openReport(row.latest)">查看最新</el-button>
+                      <el-button size="small" type="primary" @click="openReview(row.latest)">批阅最新</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+              <template v-else>
+                <div v-if="loadingSubs" class="meta">加载中...</div>
+                <div v-else-if="submissionGroups.length === 0" class="meta">暂无提交</div>
+
+                <el-card v-else v-for="g in submissionGroups" :key="g.key" shadow="never" class="stuCard">
+                  <div class="stuHead">
+                    <div>
+                      <div class="stuName">{{ g.studentDisplayName }}</div>
+                      <div class="meta" v-if="g.studentUsername">{{ g.studentUsername }}</div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <el-tag size="small" type="info">最新 v{{ g.latest.versionNo }}</el-tag>
+                      <el-tag size="small" type="success">{{ g.versions.length }} 版</el-tag>
+                    </div>
+                  </div>
+
+                  <div class="meta" style="margin-top: 6px">最近提交：{{ g.latest.submittedAt }}</div>
+
+                  <div class="stuActions">
+                    <el-button size="small" @click="openReport(g.latest)">查看最新</el-button>
+                    <el-button size="small" type="primary" @click="openReview(g.latest)">批阅最新</el-button>
+                  </div>
+
+                  <el-collapse class="stuCollapse">
+                    <el-collapse-item :title="`查看全部版本（${g.versions.length}）`" :name="g.key">
+                      <div v-for="s in g.versions" :key="s.id" class="verRow">
+                        <div class="verLeft">
+                          <div class="verTitle">v{{ s.versionNo }}</div>
+                          <div class="meta">{{ s.submittedAt }}</div>
+                        </div>
+                        <div class="verBtns">
+                          <el-button size="small" @click="openReport(s)">查看</el-button>
+                          <el-button size="small" type="primary" @click="openReview(s)">批阅</el-button>
+                        </div>
+                      </div>
+                    </el-collapse-item>
+                  </el-collapse>
+                </el-card>
+              </template>
             </el-card>
           </el-tab-pane>
 
@@ -951,6 +1250,46 @@ async function copyLink() {
       <el-form-item label="说明">
         <el-input v-model="createForm.description" type="textarea" :rows="5" placeholder="任务要求/提交说明" />
       </el-form-item>
+      <el-form-item label="截止时间（可选）">
+        <el-date-picker
+          v-model="createForm.deadlineAt"
+          type="datetime"
+          placeholder="不设置则不限时"
+          style="width: 100%"
+          clearable
+          format="YYYY-MM-DD HH:mm:ss"
+          value-format="YYYY-MM-DDTHH:mm:ss"
+        />
+      </el-form-item>
+      <el-form-item label="发布班级（不选 = 全体学生）">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
+          <el-radio-group v-model="classScope" size="small">
+            <el-radio-button label="mine">我的课表班级</el-radio-button>
+            <el-radio-button label="all">全部班级</el-radio-button>
+          </el-radio-group>
+          <el-select
+            v-model="createForm.classIds"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            :loading="loadingClasses"
+            placeholder="选择班级（可多选）"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="c in classOptions"
+              :key="c.id"
+              :label="c.departmentName ? `${c.departmentName} / ${c.name}` : c.name"
+              :value="c.id"
+            />
+          </el-select>
+        </div>
+        <div class="meta" style="margin-top: 6px">
+          默认仅显示你课表里出现的班级；切换到“全部班级”可看到全系统班级。
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="createDialog = false">取消</el-button>
@@ -958,7 +1297,7 @@ async function copyLink() {
     </template>
   </el-dialog>
 
-  <el-dialog v-model="reviewDialog" title="批阅评分" width="560px">
+  <el-dialog v-model="reviewDialog" title="批阅评分" width="900px">
     <div v-if="reviewTarget" class="meta" style="margin-bottom: 10px">
       学生：{{ reviewTarget.studentDisplayName }}（v{{ reviewTarget.versionNo }}）
     </div>
@@ -970,6 +1309,7 @@ async function copyLink() {
         <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="写一句评价即可" />
       </el-form-item>
     </el-form>
+    <PlagiarismSummaryPanel v-if="reviewTarget" :submission-id="reviewTarget.id" :content-md="reviewTarget.contentMd" :compact="true" />
     <template #footer>
       <el-button @click="reviewDialog = false">取消</el-button>
       <el-button type="primary" :loading="reviewing" @click="submitReview">提交批阅</el-button>
@@ -996,26 +1336,48 @@ async function copyLink() {
         />
       </el-form-item>
 
+      <PlagiarismSummaryPanel v-if="reportTarget" :submission-id="reportTarget.id" :content-md="reportTarget.contentMd" />
+
       <el-form-item label="附件列表">
-        <el-table :data="attachments" size="small" v-loading="loadingAttachments">
-          <el-table-column prop="fileName" label="文件名" min-width="260" />
-          <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
-          <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
-          <el-table-column label="操作" width="180">
-            <template #default="{ row }: { row: AttachmentVO }">
-              <el-button size="small" @click="downloadAttachment(row)">下载</el-button>
-              <el-button size="small" @click="previewAttachment(row)">预览</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <div class="meta" style="margin-top: 6px">目前仅支持图片在线预览（其他类型请下载）。</div>
+        <template v-if="!isMobile">
+          <el-table :data="attachments" size="small" v-loading="loadingAttachments">
+            <el-table-column prop="fileName" label="文件名" min-width="260" />
+            <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
+            <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
+            <el-table-column label="操作" width="180">
+              <template #default="{ row }: { row: AttachmentVO }">
+                <el-button size="small" @click="downloadAttachment(row)">下载</el-button>
+                <el-button size="small" @click="previewAttachment(row)">预览</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+        <template v-else>
+          <div v-if="loadingAttachments" class="meta">加载中...</div>
+          <div v-else-if="attachments.length === 0" class="meta">暂无附件</div>
+          <el-card v-else v-for="a in attachments" :key="a.id" shadow="never" class="attCard">
+            <div class="attName">{{ a.fileName }}</div>
+            <div class="meta" style="margin-top: 6px">大小：{{ a.fileSize }} Byte</div>
+            <div class="meta">时间：{{ a.uploadedAt }}</div>
+            <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap">
+              <el-button size="small" @click="downloadAttachment(a)">下载</el-button>
+              <el-button size="small" @click="previewAttachment(a)">预览</el-button>
+            </div>
+          </el-card>
+        </template>
+        <div class="meta" style="margin-top: 6px">支持图片与小型文本/代码在线预览（大文件请下载）。</div>
       </el-form-item>
     </el-form>
   </el-dialog>
 
   <el-dialog v-model="previewDialog" :title="previewTitle || '附件预览'" width="900px" @closed="closePreview">
-    <div v-if="!previewUrl">加载中...</div>
-    <img v-else :src="previewUrl" style="max-width: 100%; max-height: 70vh; display: block; margin: 0 auto" />
+    <div v-if="previewKind === 'image'">
+      <div v-if="!previewUrl">加载中...</div>
+      <img v-else :src="previewUrl" style="max-width: 100%; max-height: 70vh; display: block; margin: 0 auto" />
+    </div>
+    <div v-else style="max-height: 70vh; overflow: auto; border: 1px solid #eee; padding: 10px; border-radius: 6px">
+      <pre style="margin: 0; white-space: pre-wrap; word-break: break-word">{{ previewText }}</pre>
+    </div>
   </el-dialog>
 
   <el-dialog v-model="classDialog" title="班级管理 / 签到" width="980px" @closed="stopLoops">
@@ -1173,6 +1535,20 @@ async function copyLink() {
   flex-wrap: wrap;
   align-items: center;
 }
+.groupBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.groupTable :deep(.el-table__expanded-cell) {
+  background: #fafafa;
+}
+.expandBox {
+  padding: 6px 6px 10px;
+}
 .grid {
   overflow: auto;
   border: 1px solid #eee;
@@ -1223,6 +1599,67 @@ async function copyLink() {
 .cell-box .title {
   font-weight: 700;
   margin-bottom: 2px;
+}
+.subCard {
+  margin-bottom: 10px;
+}
+.subTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.stuCard {
+  margin-bottom: 10px;
+}
+.stuHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.stuName {
+  font-weight: 800;
+  font-size: 16px;
+  word-break: break-word;
+}
+.stuActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.stuCollapse {
+  margin-top: 10px;
+}
+.verRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid #eee;
+}
+.verRow:first-child {
+  border-top: none;
+}
+.verLeft {
+  min-width: 0;
+}
+.verTitle {
+  font-weight: 700;
+}
+.verBtns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.attCard {
+  margin-bottom: 10px;
+}
+.attName {
+  font-weight: 700;
+  word-break: break-word;
 }
 .qr {
   width: 240px;

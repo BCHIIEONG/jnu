@@ -4,14 +4,22 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.HashUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskTargetClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExportRecordEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ReportAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportReviewEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportSubmissionEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskTargetClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExportRecordMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ReportAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportReviewMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
+import cn.edu.jnu.labflowreport.storage.FileStorageService;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
@@ -21,29 +29,46 @@ import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class ReportWorkflowService {
 
     private final ExpTaskMapper expTaskMapper;
     private final ReportSubmissionMapper submissionMapper;
+    private final ReportAttachmentMapper attachmentMapper;
+    private final FileStorageService storageService;
     private final ReportReviewMapper reviewMapper;
     private final ExportRecordMapper exportRecordMapper;
+    private final ExpTaskTargetClassMapper taskTargetClassMapper;
+    private final SysUserMapper sysUserMapper;
 
     public ReportWorkflowService(
             ExpTaskMapper expTaskMapper,
             ReportSubmissionMapper submissionMapper,
+            ReportAttachmentMapper attachmentMapper,
+            FileStorageService storageService,
             ReportReviewMapper reviewMapper,
-            ExportRecordMapper exportRecordMapper
+            ExportRecordMapper exportRecordMapper,
+            ExpTaskTargetClassMapper taskTargetClassMapper,
+            SysUserMapper sysUserMapper
     ) {
         this.expTaskMapper = expTaskMapper;
         this.submissionMapper = submissionMapper;
+        this.attachmentMapper = attachmentMapper;
+        this.storageService = storageService;
         this.reviewMapper = reviewMapper;
         this.exportRecordMapper = exportRecordMapper;
+        this.taskTargetClassMapper = taskTargetClassMapper;
+        this.sysUserMapper = sysUserMapper;
     }
 
     @Transactional
@@ -57,11 +82,32 @@ public class ReportWorkflowService {
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         expTaskMapper.insert(entity);
+
+        if (request.classIds() != null && !request.classIds().isEmpty()) {
+            Set<Long> uniq = request.classIds().stream().filter(Objects::nonNull).collect(Collectors.toSet());
+            for (Long classId : uniq) {
+                if (classId == null) continue;
+                ExpTaskTargetClassEntity tc = new ExpTaskTargetClassEntity();
+                tc.setTaskId(entity.getId());
+                tc.setClassId(classId);
+                tc.setCreatedAt(LocalDateTime.now());
+                taskTargetClassMapper.insert(tc);
+            }
+        }
         return getTask(entity.getId());
     }
 
-    public List<TaskVO> listTasks() {
-        return expTaskMapper.findTaskList();
+    public List<TaskVO> listTasks(AuthenticatedUser user) {
+        if (user == null || user.roleCodes() == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "未登录或登录已失效");
+        }
+        if (user.roleCodes().contains("ROLE_ADMIN")) {
+            return expTaskMapper.findTaskList();
+        }
+        if (user.roleCodes().contains("ROLE_TEACHER")) {
+            return expTaskMapper.findTaskListForTeacher(user.userId());
+        }
+        return expTaskMapper.findTaskListForStudent(user.userId());
     }
 
     public TaskVO getTask(Long taskId) {
@@ -72,9 +118,42 @@ public class ReportWorkflowService {
         return task;
     }
 
+    public TaskVO getTaskForUser(Long taskId, AuthenticatedUser user) {
+        TaskVO task = getTask(taskId);
+        if (user == null || user.roleCodes() == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "未登录或登录已失效");
+        }
+        if (user.roleCodes().contains("ROLE_ADMIN") || user.roleCodes().contains("ROLE_TEACHER")) {
+            // Teachers can only access tasks they published.
+            if (user.roleCodes().contains("ROLE_TEACHER") && !user.roleCodes().contains("ROLE_ADMIN")) {
+                if (task.getPublisherId() != null && !task.getPublisherId().equals(user.userId())) {
+                    throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权访问该任务");
+                }
+            }
+            return task;
+        }
+        ensureStudentCanAccessTask(taskId, user.userId());
+        return task;
+    }
+
     @Transactional
     public SubmissionVO submitReport(Long taskId, AuthenticatedUser student, SubmissionCreateRequest request) {
-        ensureTaskExists(taskId);
+        ensureStudentCanSubmitTask(taskId, student);
+
+        String normalized = normalizeForHash(request.contentMd());
+        String sha = HashUtils.sha256Hex(normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        ReportSubmissionEntity prev = findLatestSubmissionEntity(taskId, student.userId());
+        if (prev != null) {
+            String prevSha = prev.getContentSha256();
+            if (prevSha == null || prevSha.isBlank()) {
+                prevSha = HashUtils.sha256Hex(normalizeForHash(prev.getContentMd()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            if (sha.equalsIgnoreCase(prevSha)) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "正文内容没有变化，禁止重复提交");
+            }
+        }
+
         Integer currentVersion = submissionMapper.findMaxVersion(taskId, student.userId());
         int nextVersion = (currentVersion == null ? 0 : currentVersion) + 1;
 
@@ -83,6 +162,7 @@ public class ReportWorkflowService {
         entity.setStudentId(student.userId());
         entity.setVersionNo(nextVersion);
         entity.setContentMd(request.contentMd());
+        entity.setContentSha256(sha);
         entity.setSubmitStatus("SUBMITTED");
         entity.setSubmittedAt(LocalDateTime.now());
         entity.setCreatedAt(LocalDateTime.now());
@@ -93,14 +173,132 @@ public class ReportWorkflowService {
                 .orElseThrow(() -> new BusinessException(ApiCode.INTERNAL_ERROR, "提交记录创建成功但读取失败"));
     }
 
+    @Transactional
+    public SubmissionVO submitReportMultipart(
+            Long taskId,
+            AuthenticatedUser student,
+            String contentMd,
+            boolean confirmEmptyContent,
+            MultipartFile[] files
+    ) {
+        ensureStudentCanSubmitTask(taskId, student);
+
+        String content = Objects.toString(contentMd, "");
+        String normalized = normalizeForHash(content);
+        boolean hasText = !normalized.isBlank();
+
+        List<MultipartFile> incoming = new ArrayList<>();
+        if (files != null) {
+            for (MultipartFile f : files) {
+                if (f != null && !f.isEmpty()) incoming.add(f);
+            }
+        }
+
+        if (!hasText && incoming.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "正文为空且未上传附件");
+        }
+
+        ReportSubmissionEntity prev = findLatestSubmissionEntity(taskId, student.userId());
+        String prevNormalized = "";
+        String prevSha = "";
+        Set<String> prevAttSha = Set.of();
+        if (prev != null) {
+            prevNormalized = normalizeForHash(prev.getContentMd());
+            prevSha = prev.getContentSha256();
+            if (prevSha == null || prevSha.isBlank()) {
+                prevSha = HashUtils.sha256Hex(prevNormalized.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            if (!prevNormalized.isBlank() && !hasText && !confirmEmptyContent) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "本次提交没有正文内容，请确认后再提交");
+            }
+            prevAttSha = attachmentMapper.findBySubmissionId(prev.getId()).stream()
+                    .map(this::ensureAttachmentSha256)
+                    .filter(s -> s != null && !s.isBlank())
+                    .collect(Collectors.toSet());
+        }
+
+        String sha = HashUtils.sha256Hex(normalized.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        boolean contentChanged = (prev == null) || !sha.equalsIgnoreCase(prevSha);
+
+        List<FileWithSha> newFiles = new ArrayList<>();
+        Set<String> seen = new java.util.HashSet<>();
+        for (MultipartFile f : incoming) {
+            String fileSha = hashMultipartFileSha256(f);
+            if (fileSha.isBlank()) continue;
+            if (seen.contains(fileSha)) continue;
+            seen.add(fileSha);
+            if (prevAttSha.contains(fileSha)) {
+                continue; // duplicate of previous version
+            }
+            newFiles.add(new FileWithSha(f, fileSha));
+        }
+
+        boolean hasNewAttachment = !newFiles.isEmpty();
+        if (!contentChanged && !hasNewAttachment) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "没有新增内容，禁止提交");
+        }
+
+        Integer currentVersion = submissionMapper.findMaxVersion(taskId, student.userId());
+        int nextVersion = (currentVersion == null ? 0 : currentVersion) + 1;
+
+        ReportSubmissionEntity entity = new ReportSubmissionEntity();
+        entity.setTaskId(taskId);
+        entity.setStudentId(student.userId());
+        entity.setVersionNo(nextVersion);
+        entity.setContentMd(content);
+        entity.setContentSha256(sha);
+        entity.setSubmitStatus("SUBMITTED");
+        entity.setSubmittedAt(LocalDateTime.now());
+        entity.setCreatedAt(LocalDateTime.now());
+        submissionMapper.insert(entity);
+
+        for (FileWithSha f : newFiles) {
+            FileStorageService.SaveResult saved = storageService.saveReportAttachmentWithSha256(entity.getId(), f.file());
+
+            ReportAttachmentEntity att = new ReportAttachmentEntity();
+            att.setSubmissionId(entity.getId());
+            att.setFileName(Objects.toString(f.file().getOriginalFilename(), "attachment"));
+            att.setFilePath(saved.relativePath());
+            att.setFileSize(f.file().getSize());
+            att.setContentType(f.file().getContentType());
+            att.setFileSha256(saved.sha256Hex());
+            att.setUploadedAt(LocalDateTime.now());
+            attachmentMapper.insert(att);
+        }
+
+        return submissionMapper.findMySubmissionsByTask(taskId, student.userId()).stream()
+                .filter(item -> item.getId().equals(entity.getId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ApiCode.INTERNAL_ERROR, "提交记录创建成功但读取失败"));
+    }
+
     public List<SubmissionVO> listMySubmissions(Long taskId, AuthenticatedUser student) {
-        ensureTaskExists(taskId);
+        ensureStudentCanAccessTask(taskId, student.userId());
         return submissionMapper.findMySubmissionsByTask(taskId, student.userId());
     }
 
     public List<SubmissionVO> listTaskSubmissions(Long taskId) {
         ensureTaskExists(taskId);
         return submissionMapper.findSubmissionsByTask(taskId);
+    }
+
+    public List<SubmissionVO> listTaskSubmissions(Long taskId, AuthenticatedUser actor) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        return submissionMapper.findSubmissionsByTask(taskId);
+    }
+
+    @Transactional
+    public TaskVO updateTaskStatus(Long taskId, AuthenticatedUser actor, cn.edu.jnu.labflowreport.workflow.dto.TaskStatusUpdateRequest request) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        String status = request == null ? null : request.status();
+        if (!"OPEN".equalsIgnoreCase(status) && !"CLOSED".equalsIgnoreCase(status)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "status 只能是 OPEN 或 CLOSED");
+        }
+        ExpTaskEntity task = getTaskEntityOrThrow(taskId);
+        task.setStatus(status.toUpperCase(java.util.Locale.ROOT));
+        task.setUpdatedAt(LocalDateTime.now());
+        expTaskMapper.updateById(task);
+        return getTask(taskId);
     }
 
     @Transactional
@@ -154,7 +352,7 @@ public class ReportWorkflowService {
 
     @Transactional
     public String exportScoresCsv(Long taskId, AuthenticatedUser operator) {
-        ensureTaskExists(taskId);
+        ensureTeacherOrAdminCanManageTask(taskId, operator);
         List<ScoreExportRowVO> rows = submissionMapper.findScoreRowsByTask(taskId);
 
         ExportRecordEntity record = new ExportRecordEntity();
@@ -185,6 +383,105 @@ public class ReportWorkflowService {
         }
     }
 
+    private ExpTaskEntity getTaskEntityOrThrow(Long taskId) {
+        ExpTaskEntity task = expTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务不存在");
+        }
+        return task;
+    }
+
+    private void ensureStudentCanAccessTask(Long taskId, Long studentId) {
+        if (taskId == null || studentId == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "参数错误");
+        }
+        List<Long> targets = taskTargetClassMapper.findTargetClassIds(taskId);
+        if (targets.isEmpty()) {
+            return; // global task
+        }
+        SysUserEntity me = sysUserMapper.selectById(studentId);
+        if (me == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
+        }
+        if (me.getClassId() == null || !targets.contains(me.getClassId())) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该任务的发布班级");
+        }
+    }
+
+    private void ensureStudentCanSubmitTask(Long taskId, AuthenticatedUser student) {
+        if (student == null || student.roleCodes() == null || !student.roleCodes().contains("ROLE_STUDENT")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只有学生可以提交报告");
+        }
+        ExpTaskEntity task = getTaskEntityOrThrow(taskId);
+        if (!"OPEN".equalsIgnoreCase(task.getStatus())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务已关闭，无法提交");
+        }
+        if (task.getDeadlineAt() != null && LocalDateTime.now().isAfter(task.getDeadlineAt())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "已超过截止时间，无法提交");
+        }
+        ensureStudentCanAccessTask(taskId, student.userId());
+    }
+
+    private void ensureTeacherOrAdminCanManageTask(Long taskId, AuthenticatedUser actor) {
+        if (actor == null || actor.roleCodes() == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "未登录或登录已失效");
+        }
+        ExpTaskEntity task = getTaskEntityOrThrow(taskId);
+        if (actor.roleCodes().contains("ROLE_ADMIN")) {
+            return;
+        }
+        if (!actor.roleCodes().contains("ROLE_TEACHER")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限访问该资源");
+        }
+        if (task.getPublisherId() == null || !task.getPublisherId().equals(actor.userId())) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只能管理自己发布的任务");
+        }
+    }
+
+    private ReportSubmissionEntity findLatestSubmissionEntity(Long taskId, Long studentId) {
+        if (taskId == null || studentId == null) return null;
+        return submissionMapper.selectOne(
+                new LambdaQueryWrapper<ReportSubmissionEntity>()
+                        .eq(ReportSubmissionEntity::getTaskId, taskId)
+                        .eq(ReportSubmissionEntity::getStudentId, studentId)
+                        .orderByDesc(ReportSubmissionEntity::getVersionNo)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private String normalizeForHash(String content) {
+        String s = Objects.toString(content, "");
+        s = s.replace("\r\n", "\n");
+        return s.trim();
+    }
+
+    private String hashMultipartFileSha256(MultipartFile file) {
+        try (var in = file.getInputStream()) {
+            return HashUtils.sha256Hex(in);
+        } catch (Exception e) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "附件读取失败");
+        }
+    }
+
+    private String ensureAttachmentSha256(ReportAttachmentEntity att) {
+        if (att == null) return "";
+        String sha = att.getFileSha256();
+        if (sha != null && !sha.isBlank()) {
+            return sha;
+        }
+        try {
+            byte[] bytes = storageService.readBytes(att.getFilePath());
+            sha = HashUtils.sha256Hex(bytes);
+            attachmentMapper.updateFileSha256(att.getId(), sha);
+            return sha;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private record FileWithSha(MultipartFile file, String sha256) {
+    }
+
     private BigDecimal normalizeScore(BigDecimal score) {
         return score.setScale(2, java.math.RoundingMode.HALF_UP);
     }
@@ -197,4 +494,3 @@ public class ReportWorkflowService {
         return "\"" + text + "\"";
     }
 }
-

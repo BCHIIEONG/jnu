@@ -7,16 +7,22 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("report_attachment")
-public class ReportAttachmentEntity {
+@TableName("plag_artifact_fp")
+public class PlagArtifactFpEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long runId;
+    private Long taskId;
     private Long submissionId;
-    private String fileName;
-    private String filePath;
-    private Long fileSize;
+    private Long studentId;
+    private Long attachmentId;
+    private String artifactType;
+    private String algo;
+    private String fp64Hex;
+    private Long byteLen;
     private String contentType;
-    private String fileSha256;
-    private LocalDateTime uploadedAt;
+    private String fileName;
+    private LocalDateTime createdAt;
 }
+

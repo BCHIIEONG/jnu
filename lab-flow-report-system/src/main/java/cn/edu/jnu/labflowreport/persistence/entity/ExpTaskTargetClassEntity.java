@@ -7,16 +7,13 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("report_attachment")
-public class ReportAttachmentEntity {
+@TableName("exp_task_target_class")
+public class ExpTaskTargetClassEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long submissionId;
-    private String fileName;
-    private String filePath;
-    private Long fileSize;
-    private String contentType;
-    private String fileSha256;
-    private LocalDateTime uploadedAt;
+    private Long taskId;
+    private Long classId;
+    private LocalDateTime createdAt;
 }
+

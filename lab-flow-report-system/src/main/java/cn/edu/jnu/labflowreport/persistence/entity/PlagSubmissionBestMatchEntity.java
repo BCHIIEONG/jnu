@@ -7,17 +7,20 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("report_submission")
-public class ReportSubmissionEntity {
+@TableName("plag_submission_best_match")
+public class PlagSubmissionBestMatchEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long runId;
     private Long taskId;
+    private Long submissionId;
     private Long studentId;
-    private Integer versionNo;
-    private String contentMd;
-    private String contentSha256;
-    private String submitStatus;
-    private LocalDateTime submittedAt;
+    private Long bestOtherSubmissionId;
+    private Long bestOtherStudentId;
+    private java.math.BigDecimal maxScore;
+    private String evidenceJson;
+    private String skippedAttachmentsJson;
     private LocalDateTime createdAt;
 }
+

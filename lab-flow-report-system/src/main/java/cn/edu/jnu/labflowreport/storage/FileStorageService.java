@@ -7,7 +7,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,10 @@ public class FileStorageService {
     }
 
     public String saveReportAttachment(Long submissionId, MultipartFile file) {
+        return saveReportAttachmentWithSha256(submissionId, file).relativePath();
+    }
+
+    public SaveResult saveReportAttachmentWithSha256(Long submissionId, MultipartFile file) {
         if (submissionId == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, "submissionId 不能为空");
         }
@@ -43,15 +48,30 @@ public class FileStorageService {
         String relative = Path.of("report-attachments", String.valueOf(submissionId), storedName).toString();
         Path target = resolveUnderBase(relative);
 
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "SHA-256 不可用");
+        }
+
         try {
             Files.createDirectories(target.getParent());
             try (InputStream in = file.getInputStream()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                // Copy while computing sha256 to avoid reading twice.
+                try (var out = Files.newOutputStream(target)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        md.update(buf, 0, n);
+                        out.write(buf, 0, n);
+                    }
+                }
             }
         } catch (IOException e) {
             throw new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "文件保存失败");
         }
-        return relative.replace('\\', '/');
+        return new SaveResult(relative.replace('\\', '/'), toHex(md.digest()));
     }
 
     public byte[] readBytes(String relativePath) {
@@ -89,5 +109,17 @@ public class FileStorageService {
             return "";
         }
         return ext;
+    }
+
+    private String toHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit((b & 0xF), 16));
+        }
+        return sb.toString();
+    }
+
+    public record SaveResult(String relativePath, String sha256Hex) {
     }
 }

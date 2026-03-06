@@ -63,6 +63,7 @@ const createForm = reactive({
 
 const editTarget = ref<UserItem | null>(null)
 const editForm = reactive({
+  username: '',
   displayName: '',
   enabled: true,
   departmentId: undefined as number | undefined,
@@ -169,6 +170,7 @@ async function openEdit(u: UserItem) {
     return
   }
   editTarget.value = u
+  editForm.username = u.username
   editForm.displayName = u.displayName
   editForm.enabled = u.enabled
   editForm.departmentId = (u.departmentId ?? undefined) as any
@@ -184,6 +186,7 @@ async function submitEdit() {
       {
         method: 'PUT',
         body: {
+          username: editForm.username,
           displayName: editForm.displayName,
           enabled: editForm.enabled,
           departmentId: editForm.departmentId ?? null,
@@ -431,6 +434,9 @@ onMounted(async () => {
         user: <code>{{ editTarget.username }}</code> (id={{ editTarget.id }})
       </div>
       <el-form label-width="120">
+        <el-form-item label="username">
+          <el-input v-model="editForm.username" />
+        </el-form-item>
         <el-form-item label="displayName">
           <el-input v-model="editForm.displayName" />
         </el-form-item>

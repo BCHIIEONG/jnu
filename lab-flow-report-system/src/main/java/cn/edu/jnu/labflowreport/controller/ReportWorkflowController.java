@@ -6,6 +6,7 @@ import cn.edu.jnu.labflowreport.common.api.ApiResponse;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskStatusUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.service.ReportAttachmentService;
 import cn.edu.jnu.labflowreport.workflow.service.ReportWorkflowService;
 import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
@@ -27,6 +28,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 @RequestMapping("/api")
@@ -52,12 +56,14 @@ public class ReportWorkflowController {
 
     @GetMapping("/tasks")
     public ApiResponse<List<TaskVO>> listTasks() {
-        return ApiResponse.success(reportWorkflowService.listTasks());
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(reportWorkflowService.listTasks(user));
     }
 
     @GetMapping("/tasks/{taskId}")
     public ApiResponse<TaskVO> getTask(@PathVariable Long taskId) {
-        return ApiResponse.success(reportWorkflowService.getTask(taskId));
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(reportWorkflowService.getTaskForUser(taskId, user));
     }
 
     @PostMapping("/tasks/{taskId}/submissions")
@@ -70,6 +76,21 @@ public class ReportWorkflowController {
         return ApiResponse.success("提交成功", reportWorkflowService.submitReport(taskId, user, request));
     }
 
+    @PostMapping(value = "/tasks/{taskId}/submissions/multipart", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('STUDENT')")
+    public ApiResponse<SubmissionVO> submitReportMultipart(
+            @PathVariable Long taskId,
+            @RequestParam(value = "contentMd", required = false) String contentMd,
+            @RequestParam(value = "confirmEmptyContent", required = false, defaultValue = "false") boolean confirmEmptyContent,
+            @RequestParam(value = "files", required = false) MultipartFile[] files
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(
+                "提交成功",
+                reportWorkflowService.submitReportMultipart(taskId, user, contentMd, confirmEmptyContent, files)
+        );
+    }
+
     @GetMapping("/tasks/{taskId}/submissions/me")
     @PreAuthorize("hasRole('STUDENT')")
     public ApiResponse<List<SubmissionVO>> listMySubmissions(@PathVariable Long taskId) {
@@ -80,7 +101,8 @@ public class ReportWorkflowController {
     @GetMapping("/tasks/{taskId}/submissions")
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
     public ApiResponse<List<SubmissionVO>> listTaskSubmissions(@PathVariable Long taskId) {
-        return ApiResponse.success(reportWorkflowService.listTaskSubmissions(taskId));
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success(reportWorkflowService.listTaskSubmissions(taskId, actor));
     }
 
     @PostMapping("/submissions/{submissionId}/review")
@@ -118,6 +140,13 @@ public class ReportWorkflowController {
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(out.toByteArray());
+    }
+
+    @PutMapping("/tasks/{taskId}/status")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<TaskVO> updateTaskStatus(@PathVariable Long taskId, @Valid @RequestBody TaskStatusUpdateRequest request) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("更新成功", reportWorkflowService.updateTaskStatus(taskId, actor, request));
     }
 
     @GetMapping("/submissions/{submissionId}/content/download")

@@ -192,9 +192,25 @@ public class AdminUserService {
                 .set(SysUserEntity::getUpdatedAt, LocalDateTime.now());
 
         Map<String, Object> changed = new HashMap<>();
+        if (request.username() != null) {
+            String username = request.username().trim();
+            if (username.isEmpty()) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "username 不能为空");
+            }
+            SysUserEntity sameName = sysUserMapper.findByUsername(username);
+            if (sameName != null && !sameName.getId().equals(userId)) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "username 已存在");
+            }
+            upd.set(SysUserEntity::getUsername, username);
+            changed.put("username", username);
+        }
         if (request.displayName() != null) {
-            upd.set(SysUserEntity::getDisplayName, request.displayName());
-            changed.put("displayName", request.displayName());
+            String displayName = request.displayName().trim();
+            if (displayName.isEmpty()) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "displayName 不能为空");
+            }
+            upd.set(SysUserEntity::getDisplayName, displayName);
+            changed.put("displayName", displayName);
         }
         if (request.enabled() != null) {
             upd.set(SysUserEntity::getEnabled, request.enabled());
