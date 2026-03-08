@@ -19,7 +19,7 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
             SELECT cs.id,
                    cs.semester_id,
                    cs.class_id,
-                   c.name AS class_name,
+                   CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,
                    cs.teacher_id,
                    t.display_name AS teacher_display_name,
                    cs.lab_room_id,
@@ -57,7 +57,7 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
             SELECT cs.id,
                    cs.semester_id,
                    cs.class_id,
-                   c.name AS class_name,
+                   CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,
                    cs.teacher_id,
                    t.display_name AS teacher_display_name,
                    cs.lab_room_id,
@@ -89,7 +89,7 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
 
     @Select("""
             SELECT DISTINCT c.id,
-                            c.name,
+                            CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS name,
                             d.name AS department_name
             FROM course_schedule cs
             JOIN org_class c ON c.id = cs.class_id

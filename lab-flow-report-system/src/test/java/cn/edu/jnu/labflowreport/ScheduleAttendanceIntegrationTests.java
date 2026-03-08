@@ -282,6 +282,30 @@ class ScheduleAttendanceIntegrationTests {
                 .andExpect(content().string(containsString("student_dyn")))
                 .andExpect(content().string(containsString("NOT_CHECKED_IN")))
                 .andExpect(content().string(containsString("CHECKED_IN")));
+
+        mockMvc.perform(post("/api/attendance/sessions/" + sessionId + "/close")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .param("grade", "2022")
+                        .param("status", "CLOSED")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(org.hamcrest.Matchers.greaterThan(0)))
+                .andExpect(content().string(containsString("签到演示课")));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions/" + sessionId + "/detail")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.totalCount").value(org.hamcrest.Matchers.greaterThan(0)))
+                .andExpect(content().string(containsString("student_absent")))
+                .andExpect(content().string(containsString("NOT_CHECKED_IN")));
     }
 
     @Test
@@ -318,7 +342,7 @@ class ScheduleAttendanceIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"departmentId":1,"name":"学生课表测试班"}
+                                {"departmentId":1,"grade":2026,"name":"学生课表测试班"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));

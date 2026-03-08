@@ -13,8 +13,8 @@ public class OrgClassEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long departmentId;
+    private Integer grade;
     private String name;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

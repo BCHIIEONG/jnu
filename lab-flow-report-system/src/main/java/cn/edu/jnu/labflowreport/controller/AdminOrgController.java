@@ -68,8 +68,12 @@ public class AdminOrgController {
     }
 
     @GetMapping("/classes")
-    public ApiResponse<List<AdminClassVO>> listClasses(@RequestParam(required = false) Long departmentId) {
-        return ApiResponse.success(adminOrgService.listClasses(departmentId));
+    public ApiResponse<List<AdminClassVO>> listClasses(
+            @RequestParam(required = false) Long departmentId,
+            @RequestParam(required = false) Integer grade,
+            @RequestParam(required = false) String q
+    ) {
+        return ApiResponse.success(adminOrgService.listClasses(departmentId, grade, q));
     }
 
     @PostMapping("/classes")
@@ -110,4 +114,3 @@ public class AdminOrgController {
                 .body(out.toByteArray());
     }
 }
-

@@ -3,6 +3,7 @@ package cn.edu.jnu.labflowreport.controller;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
@@ -59,7 +60,11 @@ public class TeacherMetaController {
                 .collect(Collectors.toMap(OrgDepartmentEntity::getId, d -> String.valueOf(d.getName())));
 
         List<TeacherClassVO> out = classes.stream()
-                .map(c -> new TeacherClassVO(c.getId(), c.getName(), depNames.get(c.getDepartmentId())))
+                .map(c -> new TeacherClassVO(
+                        c.getId(),
+                        ClassDisplayUtils.effectiveDisplayName(c.getGrade(), c.getName()),
+                        depNames.get(c.getDepartmentId())
+                ))
                 .sorted((a, b) -> {
                     String da = a.departmentName() == null ? "" : a.departmentName();
                     String db = b.departmentName() == null ? "" : b.departmentName();
@@ -78,4 +83,3 @@ public class TeacherMetaController {
         return ApiResponse.success(out);
     }
 }
-

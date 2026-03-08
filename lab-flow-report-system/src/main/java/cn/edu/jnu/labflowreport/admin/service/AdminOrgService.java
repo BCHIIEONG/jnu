@@ -9,6 +9,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminDepartmentVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
@@ -114,7 +115,7 @@ public class AdminOrgService {
         adminAuditService.record(actor, AdminAuditActions.DEPARTMENT_DELETE, "org_department", id, Map.of("name", existing.getName()));
     }
 
-    public List<AdminClassVO> listClasses(Long departmentId) {
+    public List<AdminClassVO> listClasses(Long departmentId, Integer grade, String q) {
         LambdaQueryWrapper<OrgClassEntity> w = new LambdaQueryWrapper<OrgClassEntity>().orderByAsc(OrgClassEntity::getId);
         if (departmentId != null) {
             w.eq(OrgClassEntity::getDepartmentId, departmentId);
@@ -124,7 +125,15 @@ public class AdminOrgService {
         Map<Long, String> depNames = depIds.isEmpty() ? Map.of() : orgDepartmentMapper.selectBatchIds(depIds).stream()
                 .collect(Collectors.toMap(OrgDepartmentEntity::getId, OrgDepartmentEntity::getName));
         return classes.stream()
-                .map(c -> new AdminClassVO(c.getId(), c.getDepartmentId(), depNames.get(c.getDepartmentId()), c.getName(), c.getCreatedAt(), c.getUpdatedAt()))
+                .map(c -> toClassVO(c, depNames.get(c.getDepartmentId())))
+                .filter(c -> grade == null || (c.grade() != null && c.grade().equals(grade)))
+                .filter(c -> {
+                    if (!StringUtils.hasText(q)) {
+                        return true;
+                    }
+                    String keyword = q.trim();
+                    return c.name().contains(keyword) || c.displayName().contains(keyword);
+                })
                 .toList();
     }
 
@@ -136,6 +145,7 @@ public class AdminOrgService {
         }
         OrgClassEntity dup = orgClassMapper.selectOne(new LambdaQueryWrapper<OrgClassEntity>()
                 .eq(OrgClassEntity::getDepartmentId, request.departmentId())
+                .eq(OrgClassEntity::getGrade, request.grade())
                 .eq(OrgClassEntity::getName, request.name().trim())
                 .last("LIMIT 1"));
         if (dup != null) {
@@ -143,15 +153,17 @@ public class AdminOrgService {
         }
         OrgClassEntity entity = new OrgClassEntity();
         entity.setDepartmentId(request.departmentId());
+        entity.setGrade(request.grade());
         entity.setName(request.name().trim());
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         orgClassMapper.insert(entity);
         adminAuditService.record(actor, AdminAuditActions.CLASS_CREATE, "org_class", entity.getId(), Map.of(
                 "departmentId", entity.getDepartmentId(),
+                "grade", entity.getGrade(),
                 "name", entity.getName()
         ));
-        return new AdminClassVO(entity.getId(), entity.getDepartmentId(), dep.getName(), entity.getName(), entity.getCreatedAt(), entity.getUpdatedAt());
+        return toClassVO(entity, dep.getName());
     }
 
     @Transactional
@@ -166,6 +178,7 @@ public class AdminOrgService {
         }
         OrgClassEntity dup = orgClassMapper.selectOne(new LambdaQueryWrapper<OrgClassEntity>()
                 .eq(OrgClassEntity::getDepartmentId, request.departmentId())
+                .eq(OrgClassEntity::getGrade, request.grade())
                 .eq(OrgClassEntity::getName, request.name().trim())
                 .ne(OrgClassEntity::getId, id)
                 .last("LIMIT 1"));
@@ -175,14 +188,16 @@ public class AdminOrgService {
         orgClassMapper.update(null, new LambdaUpdateWrapper<OrgClassEntity>()
                 .eq(OrgClassEntity::getId, id)
                 .set(OrgClassEntity::getDepartmentId, request.departmentId())
+                .set(OrgClassEntity::getGrade, request.grade())
                 .set(OrgClassEntity::getName, request.name().trim())
                 .set(OrgClassEntity::getUpdatedAt, LocalDateTime.now()));
         adminAuditService.record(actor, AdminAuditActions.CLASS_UPDATE, "org_class", id, Map.of(
                 "departmentId", request.departmentId(),
+                "grade", request.grade(),
                 "name", request.name().trim()
         ));
         OrgClassEntity updated = orgClassMapper.selectById(id);
-        return new AdminClassVO(updated.getId(), updated.getDepartmentId(), dep.getName(), updated.getName(), updated.getCreatedAt(), updated.getUpdatedAt());
+        return toClassVO(updated, dep.getName());
     }
 
     @Transactional
@@ -216,18 +231,33 @@ public class AdminOrgService {
     }
 
     public String exportClassesCsv(AuthenticatedUser actor) {
-        List<AdminClassVO> classes = listClasses(null);
+        List<AdminClassVO> classes = listClasses(null, null, null);
         StringBuilder csv = new StringBuilder();
-        csv.append("id,departmentId,departmentName,name,createdAt\n");
+        csv.append("id,departmentId,departmentName,grade,name,displayName,createdAt\n");
         for (AdminClassVO c : classes) {
             csv.append(AdminCsv.cell(c.id())).append(",");
             csv.append(AdminCsv.cell(c.departmentId())).append(",");
             csv.append(AdminCsv.cell(c.departmentName())).append(",");
+            csv.append(AdminCsv.cell(c.grade())).append(",");
             csv.append(AdminCsv.cell(c.name())).append(",");
+            csv.append(AdminCsv.cell(c.displayName())).append(",");
             csv.append(AdminCsv.cell(c.createdAt())).append("\n");
         }
         adminAuditService.record(actor, AdminAuditActions.CLASS_EXPORT, "org_class", null, Map.of("count", classes.size()));
         return csv.toString();
     }
-}
 
+    private AdminClassVO toClassVO(OrgClassEntity entity, String departmentName) {
+        Integer effectiveGrade = ClassDisplayUtils.effectiveGrade(entity.getGrade(), entity.getName());
+        return new AdminClassVO(
+                entity.getId(),
+                entity.getDepartmentId(),
+                departmentName,
+                effectiveGrade,
+                entity.getName(),
+                ClassDisplayUtils.effectiveDisplayName(entity.getGrade(), entity.getName()),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt()
+        );
+    }
+}

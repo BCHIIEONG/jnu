@@ -5,7 +5,7 @@ import { apiData } from '../../../api/http'
 import { useAuthStore } from '../../../stores/auth'
 
 type Semester = { id: number; name: string }
-type ClassItem = { id: number; name: string; departmentName?: string }
+type ClassItem = { id: number; name: string; displayName: string; departmentName?: string }
 type LabRoom = { id: number; name: string }
 type TimeSlot = { id: number; code: string; name: string; startTime: string; endTime: string }
 type TeacherUser = { id: number; username: string; displayName: string }
@@ -177,7 +177,7 @@ onMounted(async () => {
         <el-option v-for="s in semesters" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
       <el-select v-model="filter.classId" clearable placeholder="班级" style="width: 220px">
-        <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id" />
+        <el-option v-for="c in classes" :key="c.id" :label="c.displayName" :value="c.id" />
       </el-select>
       <el-select v-model="filter.teacherId" clearable placeholder="教师" style="width: 180px">
         <el-option v-for="t in teachers" :key="t.id" :label="t.displayName" :value="t.id" />
@@ -214,7 +214,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="班级">
           <el-select v-model="form.classId" style="width: 100%">
-            <el-option v-for="c in classes" :key="c.id" :label="c.name" :value="c.id" />
+            <el-option v-for="c in classes" :key="c.id" :label="c.displayName" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="教师">
@@ -259,4 +259,3 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 </style>
-

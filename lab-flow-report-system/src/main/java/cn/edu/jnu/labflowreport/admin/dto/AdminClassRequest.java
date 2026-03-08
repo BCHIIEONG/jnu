@@ -6,8 +6,9 @@ import jakarta.validation.constraints.NotNull;
 public record AdminClassRequest(
         @NotNull(message = "departmentId 不能为空")
         Long departmentId,
+        @NotNull(message = "grade 不能为空")
+        Integer grade,
         @NotBlank(message = "name 不能为空")
         String name
 ) {
 }
-

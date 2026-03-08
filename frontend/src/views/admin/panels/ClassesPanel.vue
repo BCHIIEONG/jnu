@@ -5,7 +5,16 @@ import { apiData, downloadBlob } from '../../../api/http'
 import { useAuthStore } from '../../../stores/auth'
 
 type Department = { id: number; name: string }
-type ClassItem = { id: number; departmentId: number; departmentName: string; name: string; createdAt: string; updatedAt: string }
+type ClassItem = {
+  id: number
+  departmentId: number
+  departmentName: string
+  grade?: number | null
+  name: string
+  displayName: string
+  createdAt: string
+  updatedAt: string
+}
 
 const auth = useAuthStore()
 const token = computed(() => auth.token)
@@ -14,11 +23,15 @@ const loading = ref(false)
 const departments = ref<Department[]>([])
 const rows = ref<ClassItem[]>([])
 
-const filter = reactive({ departmentId: undefined as number | undefined })
+const filter = reactive({
+  departmentId: undefined as number | undefined,
+  grade: undefined as number | undefined,
+  q: '',
+})
 
 const dialog = ref(false)
 const editing = ref<ClassItem | null>(null)
-const form = reactive({ departmentId: undefined as number | undefined, name: '' })
+const form = reactive({ departmentId: undefined as number | undefined, grade: undefined as number | undefined, name: '' })
 
 async function loadMeta() {
   departments.value = await apiData<Department[]>('/api/admin/departments', { method: 'GET' }, token.value)
@@ -29,6 +42,8 @@ async function load() {
   try {
     const q = new URLSearchParams()
     if (filter.departmentId) q.set('departmentId', String(filter.departmentId))
+    if (filter.grade) q.set('grade', String(filter.grade))
+    if (filter.q.trim()) q.set('q', filter.q.trim())
     rows.value = await apiData<ClassItem[]>(`/api/admin/classes?${q.toString()}`, { method: 'GET' }, token.value)
   } catch (e: any) {
     ElMessage.error(e?.message ?? '加载失败')
@@ -40,6 +55,7 @@ async function load() {
 function openCreate() {
   editing.value = null
   form.departmentId = filter.departmentId
+  form.grade = filter.grade
   form.name = ''
   dialog.value = true
 }
@@ -47,6 +63,7 @@ function openCreate() {
 function openEdit(c: ClassItem) {
   editing.value = c
   form.departmentId = c.departmentId
+  form.grade = c.grade ?? undefined
   form.name = c.name
   dialog.value = true
 }
@@ -57,11 +74,15 @@ async function submit() {
       ElMessage.warning('departmentId 不能为空')
       return
     }
+    if (!form.grade) {
+      ElMessage.warning('grade 不能为空')
+      return
+    }
     if (!form.name.trim()) {
       ElMessage.warning('name 不能为空')
       return
     }
-    const body = { departmentId: form.departmentId, name: form.name }
+    const body = { departmentId: form.departmentId, grade: form.grade, name: form.name }
     if (editing.value) {
       await apiData(`/api/admin/classes/${editing.value.id}`, { method: 'PUT', body }, token.value)
       ElMessage.success('更新成功')
@@ -78,7 +99,7 @@ async function submit() {
 
 async function del(c: ClassItem) {
   try {
-    await ElMessageBox.confirm(`确认删除班级: ${c.departmentName} / ${c.name} ?`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确认删除班级: ${c.departmentName} / ${c.displayName} ?`, '提示', { type: 'warning' })
     await apiData(`/api/admin/classes/${c.id}`, { method: 'DELETE' }, token.value)
     ElMessage.success('已删除')
     await load()
@@ -113,6 +134,8 @@ onMounted(async () => {
       <el-select v-model="filter.departmentId" clearable placeholder="筛选院系" style="width: 200px">
         <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
       </el-select>
+      <el-input-number v-model="filter.grade" :min="2000" :max="2100" placeholder="年级" style="width: 140px" />
+      <el-input v-model="filter.q" placeholder="关键词：班级名称/展示名称" style="width: 220px" />
       <el-button type="primary" @click="() => { load() }">查询</el-button>
       <el-button @click="openCreate">新建班级</el-button>
       <el-button @click="exportCsv">导出 CSV</el-button>
@@ -122,7 +145,13 @@ onMounted(async () => {
     <el-table :data="rows" v-loading="loading" stripe height="520">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="departmentName" label="院系" width="180" />
-      <el-table-column prop="name" label="班级名称" />
+      <el-table-column label="年级" width="100">
+        <template #default="{ row }">
+          {{ row.grade ? `${row.grade}级` : '-' }}
+        </template>
+      </el-table-column>
+      <el-table-column prop="name" label="班级名称" min-width="180" />
+      <el-table-column prop="displayName" label="展示名称" min-width="220" />
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -138,8 +167,11 @@ onMounted(async () => {
             <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="name">
-          <el-input v-model="form.name" placeholder="例如: 2022级软件工程1班" />
+        <el-form-item label="年级">
+          <el-input-number v-model="form.grade" :min="2000" :max="2100" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="班级名称">
+          <el-input v-model="form.name" placeholder="例如: 软件工程1班" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -162,4 +194,3 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 </style>
-

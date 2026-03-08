@@ -58,7 +58,7 @@ class TaskClassPlagiarismIntegrationTests {
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"departmentId":%d,"name":"%s"}
+                                    {"departmentId":%d,"grade":2024,"name":"%s"}
                                     """.formatted(deptIdNum.longValue(), name)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(0))

@@ -7,7 +7,7 @@ import { useAuthStore } from '../../../stores/auth'
 type PageResult<T> = { page: number; size: number; total: number; items: T[] }
 type Role = { id: number; code: string; name: string; userCount: number }
 type Department = { id: number; name: string }
-type ClassItem = { id: number; departmentId: number; departmentName: string; name: string }
+type ClassItem = { id: number; departmentId: number; departmentName: string; name: string; displayName: string; grade?: number | null }
 type UserItem = {
   id: number
   username: string
@@ -337,7 +337,7 @@ onMounted(async () => {
         <el-option v-for="d in departments" :key="d.id" :label="d.name" :value="d.id" />
       </el-select>
       <el-select v-model="query.classId" placeholder="班级" clearable style="width: 200px">
-        <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.name}`" :value="c.id" />
+        <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
       </el-select>
       <el-button type="primary" :loading="loading" @click="() => { query.page = 1; loadUsers() }">查询</el-button>
       <el-button :loading="metaLoading" @click="openCreate">新建</el-button>
@@ -370,7 +370,7 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="departmentName" label="院系" width="160" />
-      <el-table-column prop="className" label="班级" width="180" />
+      <el-table-column prop="className" label="班级" width="220" />
       <el-table-column label="操作" width="330" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -414,7 +414,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="班级">
           <el-select v-model="createForm.classId" :loading="metaLoading" clearable style="width: 100%">
-            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.name}`" :value="c.id" />
+            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="roleCodes">
@@ -450,7 +450,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="班级">
           <el-select v-model="editForm.classId" :loading="metaLoading" clearable style="width: 100%">
-            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.name}`" :value="c.id" />
+            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
           </el-select>
         </el-form-item>
       </el-form>

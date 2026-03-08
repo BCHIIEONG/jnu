@@ -6,9 +6,10 @@ public record AdminClassVO(
         Long id,
         Long departmentId,
         String departmentName,
+        Integer grade,
         String name,
+        String displayName,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
 }
-

@@ -57,9 +57,11 @@ class AdminIntegrationTests {
         MvcResult classResult = mockMvc.perform(post("/api/admin/classes")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"departmentId\":" + depId + ",\"name\":\"测试班级\"}"))
+                        .content("{\"departmentId\":" + depId + ",\"grade\":2022,\"name\":\"测试班级\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.grade").value(2022))
+                .andExpect(jsonPath("$.data.displayName").value("2022级测试班级"))
                 .andReturn();
         Number classIdNum = JsonPath.read(classResult.getResponse().getContentAsString(), "$.data.id");
         long classId = classIdNum.longValue();
@@ -180,7 +182,7 @@ class AdminIntegrationTests {
         MvcResult classResult = mockMvc.perform(post("/api/admin/classes")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"departmentId\":" + depId + ",\"name\":\"删除测试班级\"}"))
+                        .content("{\"departmentId\":" + depId + ",\"grade\":2023,\"name\":\"删除测试班级\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();

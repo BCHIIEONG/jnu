@@ -73,6 +73,34 @@ type AttendanceRecord = {
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
 type AttendanceStaticCodeVO = { code: string }
 type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
+type PageResult<T> = { page: number; size: number; total: number; items: T[] }
+type AttendanceHistoryItem = {
+  sessionId: number
+  courseName: string
+  classId: number
+  classDisplayName: string
+  grade?: number | null
+  labRoomName?: string | null
+  lessonDate?: string | null
+  slotName?: string | null
+  startedAt: string
+  endedAt?: string | null
+  status: string
+  checkedInCount: number
+  absentCount: number
+  totalCount: number
+}
+type AttendanceHistoryStudent = {
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  status: 'CHECKED_IN' | 'NOT_CHECKED_IN'
+  method?: string | null
+  checkedInAt?: string | null
+}
+type AttendanceHistoryDetail = AttendanceHistoryItem & {
+  roster: AttendanceHistoryStudent[]
+}
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -80,7 +108,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'report' | 'schedule'>('report')
+const activeTab = ref<'report' | 'schedule' | 'history'>('report')
 
 const tasks = ref<TaskVO[]>([])
 const loadingTasks = ref(false)
@@ -111,6 +139,8 @@ const creating = ref(false)
 const classScope = ref<'mine' | 'all'>('mine')
 const classOptions = ref<TeacherClassVO[]>([])
 const loadingClasses = ref(false)
+const historyClassOptions = ref<TeacherClassVO[]>([])
+const loadingHistoryClasses = ref(false)
 
 const reviewDialog = ref(false)
 const reviewTarget = ref<SubmissionVO | null>(null)
@@ -321,6 +351,21 @@ async function loadLanIps() {
 
 const records = ref<AttendanceRecord[]>([])
 const loadingRecords = ref(false)
+const historyLoading = ref(false)
+const historyDetailLoading = ref(false)
+const historyData = ref<PageResult<AttendanceHistoryItem>>({ page: 1, size: 20, total: 0, items: [] })
+const historyFilter = reactive({
+  grade: undefined as number | undefined,
+  classId: undefined as number | undefined,
+  roomKeyword: '',
+  from: '' as string,
+  to: '' as string,
+  status: '',
+  page: 1,
+  size: 20,
+})
+const historyDetailDialog = ref(false)
+const historyDetail = ref<AttendanceHistoryDetail | null>(null)
 
 let tokenTimer: number | null = null
 let recordsTimer: number | null = null
@@ -469,6 +514,81 @@ async function loadClassOptions() {
     ElMessage.error(e?.message ?? '加载班级列表失败')
   } finally {
     loadingClasses.value = false
+  }
+}
+
+async function loadHistoryClassOptions() {
+  loadingHistoryClasses.value = true
+  try {
+    historyClassOptions.value = await apiData<TeacherClassVO[]>(
+      '/api/teacher/classes?scope=mine',
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    historyClassOptions.value = []
+    ElMessage.error(e?.message ?? '加载历史签到班级失败')
+  } finally {
+    loadingHistoryClasses.value = false
+  }
+}
+
+function buildHistoryQuery() {
+  const q = new URLSearchParams()
+  if (historyFilter.grade) q.set('grade', String(historyFilter.grade))
+  if (historyFilter.classId) q.set('classId', String(historyFilter.classId))
+  if (historyFilter.roomKeyword.trim()) q.set('roomKeyword', historyFilter.roomKeyword.trim())
+  if (historyFilter.from) q.set('from', historyFilter.from)
+  if (historyFilter.to) q.set('to', historyFilter.to)
+  if (historyFilter.status) q.set('status', historyFilter.status)
+  q.set('page', String(historyFilter.page))
+  q.set('size', String(historyFilter.size))
+  return q.toString()
+}
+
+async function loadHistorySessions(resetPage = false) {
+  if (resetPage) historyFilter.page = 1
+  historyLoading.value = true
+  try {
+    historyData.value = await apiData<PageResult<AttendanceHistoryItem>>(
+      `/api/teacher/attendance/sessions?${buildHistoryQuery()}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加载历史签到失败')
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function openHistoryDetail(row: AttendanceHistoryItem) {
+  historyDetailDialog.value = true
+  historyDetailLoading.value = true
+  historyDetail.value = null
+  try {
+    historyDetail.value = await apiData<AttendanceHistoryDetail>(
+      `/api/teacher/attendance/sessions/${row.sessionId}/detail`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加载签到详情失败')
+    historyDetailDialog.value = false
+  } finally {
+    historyDetailLoading.value = false
+  }
+}
+
+async function exportHistoryAttendanceCsv(sessionId: number) {
+  try {
+    await downloadBlob(`/api/attendance/sessions/${sessionId}/export`, {
+      token: auth.token,
+      fallbackFilename: `attendance-session-${sessionId}.csv`,
+    })
+    ElMessage.success('已开始下载签到 CSV')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '导出失败')
   }
 }
 
@@ -654,14 +774,24 @@ async function confirmSetTaskStatus(status: 'OPEN' | 'CLOSED') {
 onMounted(loadTasks)
 
 watch(activeTab, async (tab) => {
-  if (tab !== 'schedule') return
-  if (semesters.value.length > 0 && timeSlots.value.length > 0) return
-  try {
-    semesters.value = await apiData<Semester[]>('/api/teacher/semesters', { method: 'GET' }, auth.token)
-    timeSlots.value = await apiData<TimeSlot[]>('/api/teacher/time-slots', { method: 'GET' }, auth.token)
-    scheduleSemesterId.value = scheduleSemesterId.value ?? semesters.value[0]?.id ?? null
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '加载课表元数据失败')
+  if (tab === 'schedule') {
+    if (semesters.value.length > 0 && timeSlots.value.length > 0) return
+    try {
+      semesters.value = await apiData<Semester[]>('/api/teacher/semesters', { method: 'GET' }, auth.token)
+      timeSlots.value = await apiData<TimeSlot[]>('/api/teacher/time-slots', { method: 'GET' }, auth.token)
+      scheduleSemesterId.value = scheduleSemesterId.value ?? semesters.value[0]?.id ?? null
+    } catch (e: any) {
+      ElMessage.error(e?.message ?? '加载课表元数据失败')
+    }
+    return
+  }
+  if (tab === 'history') {
+    if (historyClassOptions.value.length === 0) {
+      await loadHistoryClassOptions()
+    }
+    if (historyData.value.items.length === 0) {
+      await loadHistorySessions()
+    }
   }
 })
 
@@ -1237,6 +1367,111 @@ async function copyLink() {
               </div>
             </el-card>
           </el-tab-pane>
+
+          <el-tab-pane label="历史签到" name="history">
+            <el-card class="block" shadow="never">
+              <div class="toolbar">
+                <el-input-number v-model="historyFilter.grade" :min="2000" :max="2100" placeholder="年级" style="width: 140px" />
+                <el-select v-model="historyFilter.classId" clearable filterable :loading="loadingHistoryClasses" placeholder="班级" style="width: 240px">
+                  <el-option v-for="c in historyClassOptions" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <el-input v-model="historyFilter.roomKeyword" placeholder="课室关键字" style="width: 180px" />
+                <el-date-picker
+                  v-model="historyFilter.from"
+                  type="datetime"
+                  clearable
+                  placeholder="开始时间"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                  style="width: 220px"
+                />
+                <el-date-picker
+                  v-model="historyFilter.to"
+                  type="datetime"
+                  clearable
+                  placeholder="结束时间"
+                  format="YYYY-MM-DD HH:mm:ss"
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                  style="width: 220px"
+                />
+                <el-select v-model="historyFilter.status" clearable placeholder="状态" style="width: 140px">
+                  <el-option label="OPEN" value="OPEN" />
+                  <el-option label="CLOSED" value="CLOSED" />
+                </el-select>
+                <el-button type="primary" @click="loadHistorySessions(true)">查询</el-button>
+                <el-button :loading="historyLoading" @click="loadHistorySessions()">刷新</el-button>
+              </div>
+
+              <div class="meta" style="margin: 8px 0 12px">
+                集中查看历史签到场次，可按班级、年级、课室和时间筛选，并重新下载签到 CSV。
+              </div>
+
+              <template v-if="!isMobile">
+                <el-table :data="historyData.items" v-loading="historyLoading" stripe>
+                  <el-table-column prop="courseName" label="课程" min-width="140" />
+                  <el-table-column prop="classDisplayName" label="班级" min-width="160" />
+                  <el-table-column label="年级" width="90">
+                    <template #default="{ row }: { row: AttendanceHistoryItem }">
+                      {{ row.grade ? `${row.grade}级` : '-' }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="labRoomName" label="课室" min-width="120" />
+                  <el-table-column label="日期/节次" min-width="170">
+                    <template #default="{ row }: { row: AttendanceHistoryItem }">
+                      <div>{{ row.lessonDate || '-' }}</div>
+                      <div class="meta">{{ row.slotName || '-' }}</div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="startedAt" label="开始时间" min-width="180" />
+                  <el-table-column prop="endedAt" label="结束时间" min-width="180" />
+                  <el-table-column prop="status" label="状态" width="100" />
+                  <el-table-column label="统计" width="130">
+                    <template #default="{ row }: { row: AttendanceHistoryItem }">
+                      {{ row.checkedInCount }}/{{ row.totalCount }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="200" fixed="right">
+                    <template #default="{ row }: { row: AttendanceHistoryItem }">
+                      <el-button size="small" @click="openHistoryDetail(row)">查看详情</el-button>
+                      <el-button size="small" @click="exportHistoryAttendanceCsv(row.sessionId)">导出 CSV</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+              <template v-else>
+                <div v-if="historyLoading" class="meta">加载中...</div>
+                <div v-else-if="historyData.items.length === 0" class="meta">暂无历史签到记录</div>
+                <el-card v-else v-for="row in historyData.items" :key="row.sessionId" shadow="never" class="historyCard">
+                  <div class="stuHead">
+                    <div>
+                      <div class="stuName">{{ row.courseName }}</div>
+                      <div class="meta">{{ row.classDisplayName }}</div>
+                    </div>
+                    <el-tag size="small" :type="row.status === 'OPEN' ? 'success' : 'info'">{{ row.status }}</el-tag>
+                  </div>
+                  <div class="meta" style="margin-top: 8px">课室：{{ row.labRoomName || '-' }}</div>
+                  <div class="meta">时间：{{ row.lessonDate || '-' }} / {{ row.slotName || '-' }}</div>
+                  <div class="meta">开始：{{ row.startedAt }}</div>
+                  <div class="meta">统计：已到 {{ row.checkedInCount }} / 应到 {{ row.totalCount }} / 未到 {{ row.absentCount }}</div>
+                  <div class="stuActions">
+                    <el-button size="small" @click="openHistoryDetail(row)">查看详情</el-button>
+                    <el-button size="small" @click="exportHistoryAttendanceCsv(row.sessionId)">导出 CSV</el-button>
+                  </div>
+                </el-card>
+              </template>
+
+              <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+                <el-pagination
+                  background
+                  layout="prev, pager, next, total"
+                  :current-page="historyData.page"
+                  :page-size="historyData.size"
+                  :total="historyData.total"
+                  @current-change="(p: number) => { historyFilter.page = p; loadHistorySessions() }"
+                />
+              </div>
+            </el-card>
+          </el-tab-pane>
         </el-tabs>
       </el-main>
     </el-container>
@@ -1481,6 +1716,44 @@ async function copyLink() {
       </el-tab-pane>
     </el-tabs>
   </el-dialog>
+
+  <el-dialog v-model="historyDetailDialog" title="签到详情" width="980px">
+    <div v-if="historyDetail" v-loading="historyDetailLoading">
+      <div class="groupBar" style="margin-bottom: 12px">
+        <div>
+          <div class="stuName" style="font-size: 18px">{{ historyDetail.courseName }}</div>
+          <div class="meta">{{ historyDetail.classDisplayName }} / {{ historyDetail.lessonDate || '-' }} / {{ historyDetail.slotName || '-' }}</div>
+          <div class="meta">课室：{{ historyDetail.labRoomName || '-' }} / 状态：{{ historyDetail.status }}</div>
+        </div>
+        <div class="meta">
+          应到 {{ historyDetail.totalCount }} / 已到 {{ historyDetail.checkedInCount }} / 未到 {{ historyDetail.absentCount }}
+        </div>
+      </div>
+
+      <template v-if="!isMobile">
+        <el-table :data="historyDetail.roster" stripe>
+          <el-table-column prop="studentUsername" label="学号/账号" width="160" />
+          <el-table-column prop="studentDisplayName" label="姓名" width="140" />
+          <el-table-column prop="status" label="状态" width="140" />
+          <el-table-column prop="method" label="方式" width="120" />
+          <el-table-column prop="checkedInAt" label="签到时间" min-width="180" />
+        </el-table>
+      </template>
+      <template v-else>
+        <el-card v-for="item in historyDetail.roster" :key="item.studentId" shadow="never" class="historyCard">
+          <div class="stuHead">
+            <div>
+              <div class="stuName" style="font-size: 16px">{{ item.studentDisplayName }}</div>
+              <div class="meta">{{ item.studentUsername }}</div>
+            </div>
+            <el-tag size="small" :type="item.status === 'CHECKED_IN' ? 'success' : 'info'">{{ item.status }}</el-tag>
+          </div>
+          <div class="meta" style="margin-top: 8px">方式：{{ item.method || '-' }}</div>
+          <div class="meta">签到时间：{{ item.checkedInAt || '-' }}</div>
+        </el-card>
+      </template>
+    </div>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -1601,6 +1874,9 @@ async function copyLink() {
   margin-bottom: 2px;
 }
 .subCard {
+  margin-bottom: 10px;
+}
+.historyCard {
   margin-bottom: 10px;
 }
 .subTop {

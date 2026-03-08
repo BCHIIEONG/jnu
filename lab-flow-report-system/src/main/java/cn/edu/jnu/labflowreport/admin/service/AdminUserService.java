@@ -12,6 +12,7 @@ import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysRoleEntity;
@@ -463,7 +464,7 @@ public class AdminUserService {
                     u.getDepartmentId(),
                     u.getDepartmentId() == null ? null : deptNames.get(u.getDepartmentId()),
                     u.getClassId(),
-                    clazz == null ? null : clazz.getName(),
+                    clazz == null ? null : ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()),
                     roles == null ? List.of() : roles,
                     u.getCreatedAt(),
                     u.getUpdatedAt()
@@ -584,10 +585,17 @@ public class AdminUserService {
         if (departmentId == null || !StringUtils.hasText(className)) {
             return null;
         }
-        OrgClassEntity clazz = orgClassMapper.selectOne(new LambdaQueryWrapper<OrgClassEntity>()
-                .eq(OrgClassEntity::getDepartmentId, departmentId)
-                .eq(OrgClassEntity::getName, className.trim())
-                .last("LIMIT 1"));
-        return clazz == null ? null : clazz.getId();
+        String wanted = className.trim();
+        List<OrgClassEntity> classes = orgClassMapper.selectList(new LambdaQueryWrapper<OrgClassEntity>()
+                .eq(OrgClassEntity::getDepartmentId, departmentId));
+        for (OrgClassEntity clazz : classes) {
+            if (wanted.equals(clazz.getName())) {
+                return clazz.getId();
+            }
+            if (wanted.equals(ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()))) {
+                return clazz.getId();
+            }
+        }
+        return null;
     }
 }

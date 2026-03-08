@@ -1,5 +1,6 @@
 package cn.edu.jnu.labflowreport.attendance.service;
 
+import cn.edu.jnu.labflowreport.admin.dto.PageResult;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceManualCheckinRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceSessionCreateRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceTokenTtlUpdateRequest;
@@ -9,9 +10,13 @@ import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceSessionMapper;
 import cn.edu.jnu.labflowreport.attendance.vo.AttendanceRecordVO;
 import cn.edu.jnu.labflowreport.attendance.vo.AttendanceSessionVO;
+import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceSessionDetailVO;
+import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceSessionListItemVO;
+import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceStudentStatusVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
@@ -369,6 +374,66 @@ public class AttendanceService {
         return csv.toString();
     }
 
+    public PageResult<TeacherAttendanceSessionListItemVO> listTeacherSessions(
+            AuthenticatedUser actor,
+            Integer grade,
+            Long classId,
+            String roomKeyword,
+            LocalDateTime from,
+            LocalDateTime to,
+            String status,
+            int page,
+            int size
+    ) {
+        if (!actor.roleCodes().contains("ROLE_TEACHER")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限查看历史签到");
+        }
+        int safePage = Math.max(1, page);
+        int safeSize = Math.min(Math.max(1, size), 200);
+        int offset = (safePage - 1) * safeSize;
+        long total = sessionMapper.countTeacherHistorySessions(actor.userId(), grade, classId, roomKeyword, from, to, status);
+        if (total <= 0) {
+            return new PageResult<>(safePage, safeSize, 0, List.of());
+        }
+        List<TeacherAttendanceSessionListItemVO> items = sessionMapper.findTeacherHistorySessions(
+                actor.userId(), grade, classId, roomKeyword, from, to, status, safeSize, offset
+        );
+        items.forEach(this::normalizeHistoryItem);
+        return new PageResult<>(safePage, safeSize, total, items);
+    }
+
+    public TeacherAttendanceSessionDetailVO getTeacherSessionDetail(AuthenticatedUser actor, Long sessionId) {
+        if (!actor.roleCodes().contains("ROLE_TEACHER")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限查看历史签到");
+        }
+        AttendanceSessionEntity session = getSessionOrThrow(sessionId);
+        ensureTeacherOrAdmin(actor, session);
+
+        TeacherAttendanceSessionListItemVO meta = sessionMapper.findHistorySessionById(sessionId);
+        if (meta == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "签到场次不存在");
+        }
+        normalizeHistoryItem(meta);
+
+        TeacherAttendanceSessionDetailVO detail = new TeacherAttendanceSessionDetailVO();
+        detail.setSessionId(meta.getSessionId());
+        detail.setCourseName(meta.getCourseName());
+        detail.setClassId(meta.getClassId());
+        detail.setClassDisplayName(meta.getClassDisplayName());
+        detail.setGrade(meta.getGrade());
+        detail.setLabRoomName(meta.getLabRoomName());
+        detail.setLessonDate(meta.getLessonDate());
+        detail.setSlotName(meta.getSlotName());
+        detail.setStartedAt(meta.getStartedAt());
+        detail.setEndedAt(meta.getEndedAt());
+        detail.setStatus(meta.getStatus());
+        detail.setCheckedInCount(meta.getCheckedInCount());
+        detail.setTotalCount(meta.getTotalCount());
+        detail.setAbsentCount(meta.getAbsentCount());
+        detail.setRoster(buildRosterStatuses(sessionId, session.getClassId()));
+        return detail;
+    }
+
     public AttendanceSessionVO toVo(AttendanceSessionEntity entity) {
         AttendanceSessionVO vo = new AttendanceSessionVO();
         vo.setId(entity.getId());
@@ -397,6 +462,57 @@ public class AttendanceService {
         if (value == null) return "";
         String text = String.valueOf(value).replace("\"", "\"\"");
         return "\"" + text + "\"";
+    }
+
+    private List<TeacherAttendanceStudentStatusVO> buildRosterStatuses(Long sessionId, Long classId) {
+        List<SysUserEntity> roster = sysUserMapper.findStudentsByClassId(classId);
+        List<AttendanceRecordVO> records = recordMapper.findRecordsBySessionId(sessionId);
+        Map<Long, AttendanceRecordVO> recordByStudentId = new HashMap<>();
+        for (AttendanceRecordVO record : records) {
+            if (record.getStudentId() != null && !recordByStudentId.containsKey(record.getStudentId())) {
+                recordByStudentId.put(record.getStudentId(), record);
+            }
+        }
+
+        List<TeacherAttendanceStudentStatusVO> result = new java.util.ArrayList<>();
+        Set<Long> rosterIds = new HashSet<>();
+        for (SysUserEntity user : roster) {
+            rosterIds.add(user.getId());
+            AttendanceRecordVO record = recordByStudentId.get(user.getId());
+            result.add(new TeacherAttendanceStudentStatusVO(
+                    user.getId(),
+                    user.getUsername(),
+                    user.getDisplayName(),
+                    record == null ? "NOT_CHECKED_IN" : "CHECKED_IN",
+                    record == null ? null : record.getMethod(),
+                    record == null ? null : record.getCheckedInAt()
+            ));
+        }
+        for (AttendanceRecordVO record : records) {
+            if (record.getStudentId() == null || rosterIds.contains(record.getStudentId())) {
+                continue;
+            }
+            result.add(new TeacherAttendanceStudentStatusVO(
+                    record.getStudentId(),
+                    record.getStudentUsername(),
+                    record.getStudentDisplayName(),
+                    "CHECKED_IN",
+                    record.getMethod(),
+                    record.getCheckedInAt()
+            ));
+        }
+        return result;
+    }
+
+    private void fillAbsentCount(TeacherAttendanceSessionListItemVO item) {
+        if (item.getGrade() == null) {
+            item.setGrade(ClassDisplayUtils.effectiveGrade(null, item.getClassDisplayName()));
+        }
+        item.setAbsentCount(Math.max(0, item.getTotalCount() - item.getCheckedInCount()));
+    }
+
+    private void normalizeHistoryItem(TeacherAttendanceSessionListItemVO item) {
+        fillAbsentCount(item);
     }
 
     private String generateStaticCodeUnique() {
