@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiData, downloadBlob, fetchBlob } from '../../api/http'
+import { apiData, downloadBlob, fetchBlob, uploadFormData } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 import UiModeToggle from '../common/UiModeToggle.vue'
 import { useUiStore } from '../../stores/ui'
@@ -17,6 +17,17 @@ type TaskVO = {
   deadlineAt?: string | null
   status?: string
   createdAt?: string
+  attachments?: TaskAttachmentVO[]
+}
+
+type TaskAttachmentVO = {
+  id: number
+  taskId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedAt: string
+  uploadedBy?: number | null
 }
 
 type SubmissionVO = {
@@ -206,13 +217,20 @@ type SubmissionGroup = {
 const submissionQ = ref('')
 
 const createDialog = ref(false)
+const editTaskDialog = ref(false)
 const createForm = reactive({
   title: '',
   description: '',
   deadlineAt: null as string | null,
   classIds: [] as number[],
 })
+const editTaskForm = reactive({
+  title: '',
+})
+const createTaskFiles = ref<File[]>([])
+const createTaskFileInput = ref<HTMLInputElement | null>(null)
 const creating = ref(false)
+const updatingTaskTitle = ref(false)
 const classScope = ref<'mine' | 'all'>('mine')
 const classOptions = ref<TeacherClassVO[]>([])
 const loadingClasses = ref(false)
@@ -237,6 +255,9 @@ const previewUrl = ref<string | null>(null)
 const previewTitle = ref('')
 const previewKind = ref<'image' | 'text'>('image')
 const previewText = ref<string>('')
+const taskAttachmentUploadFiles = ref<File[]>([])
+const taskAttachmentUploadInput = ref<HTMLInputElement | null>(null)
+const taskAttachmentUploading = ref(false)
 const progressStudents = ref<TeacherTaskProgressStudentVO[]>([])
 const loadingProgressStudents = ref(false)
 const progressStudentQ = ref('')
@@ -570,7 +591,7 @@ async function loadTasks() {
 
 async function selectTask(taskId: number) {
   selectedTaskId.value = taskId
-  taskDetail.value = await apiData<TaskVO>(`/api/tasks/${taskId}`, { method: 'GET' }, auth.token)
+  await loadTaskDetail(taskId)
   if (activeTab.value === 'report') {
     await loadSubmissions()
     return
@@ -580,6 +601,10 @@ async function selectTask(taskId: number) {
     return
   }
   await loadSubmissions()
+}
+
+async function loadTaskDetail(taskId: number) {
+  taskDetail.value = await apiData<TaskVO>(`/api/tasks/${taskId}`, { method: 'GET' }, auth.token)
 }
 
 async function loadSubmissions() {
@@ -861,7 +886,7 @@ async function createTask() {
   }
   creating.value = true
   try {
-    await apiData(
+    const created = await apiData<TaskVO>(
       '/api/tasks',
       {
         method: 'POST',
@@ -874,17 +899,134 @@ async function createTask() {
       },
       auth.token,
     )
+    if (createTaskFiles.value.length > 0) {
+      const fd = new FormData()
+      for (const file of createTaskFiles.value) fd.append('files', file)
+      await uploadFormData(`/api/tasks/${created.id}/attachments`, { token: auth.token, formData: fd })
+    }
     ElMessage.success('任务创建成功')
     createDialog.value = false
     createForm.title = ''
     createForm.description = ''
     createForm.deadlineAt = null
     createForm.classIds = []
+    createTaskFiles.value = []
+    if (createTaskFileInput.value) createTaskFileInput.value.value = ''
     await loadTasks()
+    await selectTask(created.id)
   } catch (e: any) {
     ElMessage.error(e?.message ?? '创建失败')
   } finally {
     creating.value = false
+  }
+}
+
+function onPickCreateTaskFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  createTaskFiles.value = Array.from(input.files ?? [])
+  createTaskFileInput.value = input
+}
+
+function onPickTaskAttachmentFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  taskAttachmentUploadFiles.value = Array.from(input.files ?? [])
+  taskAttachmentUploadInput.value = input
+}
+
+async function uploadTaskAttachments() {
+  if (!selectedTaskId.value) return
+  if (taskAttachmentUploadFiles.value.length === 0) {
+    ElMessage.warning('请选择要上传的任务附件')
+    return
+  }
+  taskAttachmentUploading.value = true
+  try {
+    const fd = new FormData()
+    for (const file of taskAttachmentUploadFiles.value) fd.append('files', file)
+    const updated = await uploadFormData<TaskAttachmentVO[]>(`/api/tasks/${selectedTaskId.value}/attachments`, {
+      token: auth.token,
+      formData: fd,
+    })
+    if (taskDetail.value) taskDetail.value.attachments = updated
+    taskAttachmentUploadFiles.value = []
+    if (taskAttachmentUploadInput.value) taskAttachmentUploadInput.value.value = ''
+    ElMessage.success('任务附件上传成功')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '上传任务附件失败')
+  } finally {
+    taskAttachmentUploading.value = false
+  }
+}
+
+async function deleteTaskAttachment(row: TaskAttachmentVO) {
+  if (!selectedTaskId.value) return
+  try {
+    await ElMessageBox.confirm(`确定删除任务附件《${row.fileName}》？`, '删除附件', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await apiData(`/api/tasks/${selectedTaskId.value}/attachments/${row.id}`, { method: 'DELETE' }, auth.token)
+    if (taskDetail.value) {
+      taskDetail.value.attachments = (taskDetail.value.attachments || []).filter((item) => item.id !== row.id)
+    }
+    ElMessage.success('任务附件已删除')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '删除失败')
+  }
+}
+
+async function downloadTaskAttachment(row: TaskAttachmentVO) {
+  try {
+    await downloadBlob(`/api/task-attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `task-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+async function previewTaskAttachment(row: TaskAttachmentVO) {
+  try {
+    closePreview()
+    const { blob, contentType } = await fetchBlob(`/api/task-attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
   }
 }
 
@@ -982,7 +1124,11 @@ async function exportHistoryAttendanceCsv(sessionId: number) {
 watch(
   () => createDialog.value,
   async (open) => {
-    if (!open) return
+    if (!open) {
+      createTaskFiles.value = []
+      if (createTaskFileInput.value) createTaskFileInput.value.value = ''
+      return
+    }
     await loadClassOptions()
   },
 )
@@ -1156,6 +1302,62 @@ async function confirmSetTaskStatus(status: 'OPEN' | 'CLOSED') {
     return
   }
   await setTaskStatus(status)
+}
+
+async function deleteTask() {
+  if (!taskDetail.value) return
+  const deletingId = taskDetail.value.id
+  try {
+    await ElMessageBox.confirm(
+      `确定删除任务《${taskDetail.value.title}》？仅允许删除没有提交、实验步骤、完成登记、设备申请和查重记录的任务。`,
+      '删除任务',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await apiData(`/api/tasks/${deletingId}`, { method: 'DELETE' }, auth.token)
+    ElMessage.success('任务已删除')
+    if (selectedTaskId.value === deletingId) {
+      selectedTaskId.value = null
+      taskDetail.value = null
+    }
+    await loadTasks()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '删除任务失败')
+  }
+}
+
+function openEditTaskDialog() {
+  if (!taskDetail.value) return
+  editTaskForm.title = taskDetail.value.title || ''
+  editTaskDialog.value = true
+}
+
+async function updateTaskTitle() {
+  if (!taskDetail.value) return
+  if (!editTaskForm.title.trim()) {
+    ElMessage.warning('请输入任务名')
+    return
+  }
+  updatingTaskTitle.value = true
+  try {
+    const updated = await apiData<TaskVO>(
+      `/api/tasks/${taskDetail.value.id}/title`,
+      { method: 'PUT', body: { title: editTaskForm.title.trim() } },
+      auth.token,
+    )
+    taskDetail.value = updated
+    await loadTasks()
+    editTaskDialog.value = false
+    ElMessage.success('任务名已更新')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '更新任务名失败')
+  } finally {
+    updatingTaskTitle.value = false
+  }
 }
 
 onMounted(loadTasks)
@@ -1620,10 +1822,49 @@ async function copyLink() {
                       {{ taskDetail.status }}
                     </el-tag>
                   </div>
-                  <div class="meta">截止：{{ taskDetail.deadlineAt || '-' }}</div>
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+                    <div class="meta">截止：{{ taskDetail.deadlineAt || '-' }}</div>
+                    <el-button size="small" @click="openEditTaskDialog">修改任务名</el-button>
+                    <el-button size="small" type="danger" plain @click="deleteTask">删除任务</el-button>
+                  </div>
                 </div>
               </template>
               <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+              <div style="margin-top: 14px">
+                <div class="meta" style="margin-bottom: 8px">任务附件/资料</div>
+                <template v-if="!isMobile">
+                  <el-table :data="taskDetail.attachments || []" size="small" empty-text="暂无任务附件">
+                    <el-table-column prop="fileName" label="文件名" min-width="280" />
+                    <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
+                    <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
+                    <el-table-column label="操作" width="260">
+                      <template #default="{ row }: { row: TaskAttachmentVO }">
+                        <el-button size="small" @click="downloadTaskAttachment(row)">下载</el-button>
+                        <el-button size="small" @click="previewTaskAttachment(row)">预览</el-button>
+                        <el-button size="small" type="danger" @click="deleteTaskAttachment(row)">删除</el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="(taskDetail.attachments || []).length === 0" class="meta">暂无任务附件</div>
+                  <el-card v-else v-for="att in taskDetail.attachments || []" :key="att.id" shadow="never" class="attCard">
+                    <div class="attName">{{ att.fileName }}</div>
+                    <div class="meta" style="margin-top: 6px">大小：{{ att.fileSize }} Byte</div>
+                    <div class="meta">上传时间：{{ att.uploadedAt }}</div>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap">
+                      <el-button size="small" @click="downloadTaskAttachment(att)">下载</el-button>
+                      <el-button size="small" @click="previewTaskAttachment(att)">预览</el-button>
+                      <el-button size="small" type="danger" @click="deleteTaskAttachment(att)">删除</el-button>
+                    </div>
+                  </el-card>
+                </template>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px">
+                  <input type="file" multiple @change="onPickTaskAttachmentFiles" />
+                  <el-button type="primary" size="small" :loading="taskAttachmentUploading" @click="uploadTaskAttachments">追加上传</el-button>
+                  <div class="meta" v-if="taskAttachmentUploadFiles.length > 0">已选择 {{ taskAttachmentUploadFiles.length }} 个文件</div>
+                </div>
+              </div>
             </el-card>
 
             <el-card class="block" shadow="never" v-if="selectedTaskId">
@@ -1826,7 +2067,9 @@ async function copyLink() {
                   </div>
                   <div>
                     <el-button size="small" @click="loadSubmissions" :loading="loadingSubs">刷新提交</el-button>
+                    <el-button size="small" @click="openEditTaskDialog">修改任务名</el-button>
                     <el-button type="primary" size="small" @click="exportCsv">导出 CSV</el-button>
+                    <el-button type="danger" plain size="small" @click="deleteTask">删除任务</el-button>
                     <el-button
                       v-if="taskDetail.status === 'OPEN'"
                       type="danger"
@@ -1848,6 +2091,41 @@ async function copyLink() {
               </template>
               <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
               <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+              <div style="margin-top: 14px">
+                <div class="meta" style="margin-bottom: 8px">任务附件/资料</div>
+                <template v-if="!isMobile">
+                  <el-table :data="taskDetail.attachments || []" size="small" empty-text="暂无任务附件">
+                    <el-table-column prop="fileName" label="文件名" min-width="280" />
+                    <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
+                    <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
+                    <el-table-column label="操作" width="260">
+                      <template #default="{ row }: { row: TaskAttachmentVO }">
+                        <el-button size="small" @click="downloadTaskAttachment(row)">下载</el-button>
+                        <el-button size="small" @click="previewTaskAttachment(row)">预览</el-button>
+                        <el-button size="small" type="danger" @click="deleteTaskAttachment(row)">删除</el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="(taskDetail.attachments || []).length === 0" class="meta">暂无任务附件</div>
+                  <el-card v-else v-for="att in taskDetail.attachments || []" :key="att.id" shadow="never" class="attCard">
+                    <div class="attName">{{ att.fileName }}</div>
+                    <div class="meta" style="margin-top: 6px">大小：{{ att.fileSize }} Byte</div>
+                    <div class="meta">上传时间：{{ att.uploadedAt }}</div>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap">
+                      <el-button size="small" @click="downloadTaskAttachment(att)">下载</el-button>
+                      <el-button size="small" @click="previewTaskAttachment(att)">预览</el-button>
+                      <el-button size="small" type="danger" @click="deleteTaskAttachment(att)">删除</el-button>
+                    </div>
+                  </el-card>
+                </template>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px">
+                  <input type="file" multiple @change="onPickTaskAttachmentFiles" />
+                  <el-button type="primary" size="small" :loading="taskAttachmentUploading" @click="uploadTaskAttachments">追加上传</el-button>
+                  <div class="meta" v-if="taskAttachmentUploadFiles.length > 0">已选择 {{ taskAttachmentUploadFiles.length }} 个文件</div>
+                </div>
+              </div>
             </el-card>
 
             <el-card class="block" shadow="never" v-if="selectedTaskId">
@@ -2184,10 +2462,29 @@ async function copyLink() {
           默认仅显示你课表里出现的班级；切换到“全部班级”可看到全系统班级。
         </div>
       </el-form-item>
+      <el-form-item label="任务附件（可选）">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
+          <input type="file" multiple @change="onPickCreateTaskFiles" />
+          <div class="meta" v-if="createTaskFiles.length > 0">已选择 {{ createTaskFiles.length }} 个文件，创建任务后会自动上传。</div>
+          <div class="meta" v-else>支持一次选择多个任务资料文件，学生端可直接下载。</div>
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="createDialog = false">取消</el-button>
       <el-button type="primary" :loading="creating" @click="createTask">创建</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="editTaskDialog" title="修改任务名" width="420px">
+    <el-form label-position="top">
+      <el-form-item label="任务名">
+        <el-input v-model="editTaskForm.title" placeholder="请输入新的任务名" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="editTaskDialog = false">取消</el-button>
+      <el-button type="primary" :loading="updatingTaskTitle" @click="updateTaskTitle">保存</el-button>
     </template>
   </el-dialog>
 

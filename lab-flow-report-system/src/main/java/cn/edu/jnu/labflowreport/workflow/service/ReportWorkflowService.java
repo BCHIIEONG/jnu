@@ -12,20 +12,29 @@ import cn.edu.jnu.labflowreport.persistence.entity.ReportAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportReviewEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportSubmissionEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskTargetClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExportRecordMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.PlagTaskRunMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportReviewMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskAttachmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskCompletionMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceConfigMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceRequestMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressLogMapper;
 import cn.edu.jnu.labflowreport.storage.FileStorageService;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskTitleUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
 import cn.edu.jnu.labflowreport.workflow.vo.ScoreExportRowVO;
 import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskAttachmentVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -50,6 +59,12 @@ public class ReportWorkflowService {
     private final ExportRecordMapper exportRecordMapper;
     private final ExpTaskTargetClassMapper taskTargetClassMapper;
     private final SysUserMapper sysUserMapper;
+    private final TaskAttachmentMapper taskAttachmentMapper;
+    private final TaskProgressLogMapper taskProgressLogMapper;
+    private final TaskCompletionMapper taskCompletionMapper;
+    private final TaskDeviceConfigMapper taskDeviceConfigMapper;
+    private final TaskDeviceRequestMapper taskDeviceRequestMapper;
+    private final PlagTaskRunMapper plagTaskRunMapper;
 
     public ReportWorkflowService(
             ExpTaskMapper expTaskMapper,
@@ -59,7 +74,13 @@ public class ReportWorkflowService {
             ReportReviewMapper reviewMapper,
             ExportRecordMapper exportRecordMapper,
             ExpTaskTargetClassMapper taskTargetClassMapper,
-            SysUserMapper sysUserMapper
+            SysUserMapper sysUserMapper,
+            TaskAttachmentMapper taskAttachmentMapper,
+            TaskProgressLogMapper taskProgressLogMapper,
+            TaskCompletionMapper taskCompletionMapper,
+            TaskDeviceConfigMapper taskDeviceConfigMapper,
+            TaskDeviceRequestMapper taskDeviceRequestMapper,
+            PlagTaskRunMapper plagTaskRunMapper
     ) {
         this.expTaskMapper = expTaskMapper;
         this.submissionMapper = submissionMapper;
@@ -69,6 +90,12 @@ public class ReportWorkflowService {
         this.exportRecordMapper = exportRecordMapper;
         this.taskTargetClassMapper = taskTargetClassMapper;
         this.sysUserMapper = sysUserMapper;
+        this.taskAttachmentMapper = taskAttachmentMapper;
+        this.taskProgressLogMapper = taskProgressLogMapper;
+        this.taskCompletionMapper = taskCompletionMapper;
+        this.taskDeviceConfigMapper = taskDeviceConfigMapper;
+        this.taskDeviceRequestMapper = taskDeviceRequestMapper;
+        this.plagTaskRunMapper = plagTaskRunMapper;
     }
 
     @Transactional
@@ -115,7 +142,96 @@ public class ReportWorkflowService {
         if (task == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务不存在");
         }
+        task.setAttachments(listTaskAttachmentVos(taskId));
         return task;
+    }
+
+    public List<TaskAttachmentVO> listTaskAttachments(Long taskId, AuthenticatedUser user) {
+        getTaskForUser(taskId, user);
+        return listTaskAttachmentVos(taskId);
+    }
+
+    @Transactional
+    public List<TaskAttachmentVO> uploadTaskAttachments(Long taskId, AuthenticatedUser actor, MultipartFile[] files) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        List<MultipartFile> incoming = new ArrayList<>();
+        if (files != null) {
+            for (MultipartFile file : files) {
+                if (file != null && !file.isEmpty()) {
+                    incoming.add(file);
+                }
+            }
+        }
+        if (incoming.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "请选择要上传的附件");
+        }
+
+        for (MultipartFile file : incoming) {
+            FileStorageService.SaveResult saved = storageService.saveTaskAttachmentWithSha256(taskId, file);
+            TaskAttachmentEntity entity = new TaskAttachmentEntity();
+            entity.setTaskId(taskId);
+            entity.setFileName(Objects.toString(file.getOriginalFilename(), "attachment"));
+            entity.setFilePath(saved.relativePath());
+            entity.setFileSize(file.getSize());
+            entity.setContentType(file.getContentType());
+            entity.setUploadedBy(actor.userId());
+            entity.setUploadedAt(LocalDateTime.now());
+            entity.setCreatedAt(LocalDateTime.now());
+            taskAttachmentMapper.insert(entity);
+        }
+        return listTaskAttachmentVos(taskId);
+    }
+
+    @Transactional
+    public void deleteTaskAttachment(Long taskId, Long attachmentId, AuthenticatedUser actor) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        TaskAttachmentEntity entity = taskAttachmentMapper.selectById(attachmentId);
+        if (entity == null || !taskId.equals(entity.getTaskId())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务附件不存在");
+        }
+        taskAttachmentMapper.deleteById(attachmentId);
+        storageService.delete(entity.getFilePath());
+    }
+
+    public DownloadData downloadTaskAttachment(Long attachmentId, AuthenticatedUser user) {
+        TaskAttachmentEntity entity = taskAttachmentMapper.selectById(attachmentId);
+        if (entity == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务附件不存在");
+        }
+        getTaskForUser(entity.getTaskId(), user);
+        byte[] bytes = storageService.readBytes(entity.getFilePath());
+        return new DownloadData(entity.getFileName(), entity.getContentType(), bytes);
+    }
+
+    @Transactional
+    public void deleteTask(Long taskId, AuthenticatedUser actor) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        ensureTaskCanBeDeleted(taskId);
+
+        List<TaskAttachmentEntity> attachments = taskAttachmentMapper.findByTaskId(taskId);
+        for (TaskAttachmentEntity attachment : attachments) {
+            taskAttachmentMapper.deleteById(attachment.getId());
+            storageService.delete(attachment.getFilePath());
+        }
+
+        taskDeviceConfigMapper.delete(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity::getTaskId, taskId));
+        taskTargetClassMapper.delete(new LambdaQueryWrapper<ExpTaskTargetClassEntity>()
+                .eq(ExpTaskTargetClassEntity::getTaskId, taskId));
+        expTaskMapper.deleteById(taskId);
+    }
+
+    @Transactional
+    public TaskVO updateTaskTitle(Long taskId, AuthenticatedUser actor, TaskTitleUpdateRequest request) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        ExpTaskEntity entity = expTaskMapper.selectById(taskId);
+        if (entity == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务不存在");
+        }
+        entity.setTitle(request.title().trim());
+        entity.setUpdatedAt(LocalDateTime.now());
+        expTaskMapper.updateById(entity);
+        return getTask(taskId);
     }
 
     public TaskVO getTaskForUser(Long taskId, AuthenticatedUser user) {
@@ -492,5 +608,43 @@ public class ReportWorkflowService {
         }
         String text = String.valueOf(value).replace("\"", "\"\"");
         return "\"" + text + "\"";
+    }
+
+    private List<TaskAttachmentVO> listTaskAttachmentVos(Long taskId) {
+        return taskAttachmentMapper.findByTaskId(taskId).stream()
+                .map(this::toTaskAttachmentVo)
+                .toList();
+    }
+
+    private void ensureTaskCanBeDeleted(Long taskId) {
+        long submissionCount = submissionMapper.selectCount(new LambdaQueryWrapper<ReportSubmissionEntity>()
+                .eq(ReportSubmissionEntity::getTaskId, taskId));
+        long progressCount = taskProgressLogMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity::getTaskId, taskId));
+        long completionCount = taskCompletionMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity::getTaskId, taskId));
+        long deviceRequestCount = taskDeviceRequestMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity::getTaskId, taskId));
+        long plagRunCount = plagTaskRunMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity::getTaskId, taskId));
+
+        if (submissionCount > 0 || progressCount > 0 || completionCount > 0 || deviceRequestCount > 0 || plagRunCount > 0) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务已有业务记录，不能删除；如仅需停止使用，请关闭任务");
+        }
+    }
+
+    private TaskAttachmentVO toTaskAttachmentVo(TaskAttachmentEntity entity) {
+        TaskAttachmentVO vo = new TaskAttachmentVO();
+        vo.setId(entity.getId());
+        vo.setTaskId(entity.getTaskId());
+        vo.setFileName(entity.getFileName());
+        vo.setFileSize(entity.getFileSize());
+        vo.setContentType(entity.getContentType());
+        vo.setUploadedBy(entity.getUploadedBy());
+        vo.setUploadedAt(entity.getUploadedAt());
+        return vo;
+    }
+
+    public record DownloadData(String filename, String contentType, byte[] bytes) {
     }
 }

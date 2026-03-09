@@ -15,6 +15,17 @@ type TaskVO = {
   deadlineAt?: string | null
   status?: string
   createdAt?: string
+  attachments?: TaskAttachmentVO[]
+}
+
+type TaskAttachmentVO = {
+  id: number
+  taskId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedAt: string
+  uploadedBy?: number | null
 }
 
 type SubmissionVO = {
@@ -730,6 +741,58 @@ async function downloadAttachment(row: AttachmentVO) {
   }
 }
 
+async function downloadTaskAttachment(row: TaskAttachmentVO) {
+  try {
+    await downloadBlob(`/api/task-attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `task-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+async function previewTaskAttachment(row: TaskAttachmentVO) {
+  try {
+    closePreview()
+    const { blob, contentType } = await fetchBlob(`/api/task-attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
+  }
+}
+
 function closePreview() {
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
@@ -910,6 +973,27 @@ onMounted(async () => {
           </template>
           <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
           <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+        </el-card>
+
+        <el-card v-if="taskDetail" class="block" shadow="never">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px">
+              <div>任务附件/任务资料</div>
+              <div class="meta">可下载老师布置的资料</div>
+            </div>
+          </template>
+          <div v-if="(taskDetail.attachments || []).length === 0" class="meta">暂无任务附件</div>
+          <div v-else class="progressAtts">
+            <div v-for="att in taskDetail.attachments || []" :key="att.id" class="progressAtt">
+              <div class="attName">{{ att.fileName }}</div>
+              <div class="meta">大小：{{ att.fileSize }} Byte</div>
+              <div class="meta">上传时间：{{ att.uploadedAt }}</div>
+              <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                <el-button size="small" @click="downloadTaskAttachment(att)">下载</el-button>
+                <el-button size="small" @click="previewTaskAttachment(att)">预览</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
 
           <el-collapse accordion class="block">
@@ -1156,6 +1240,40 @@ onMounted(async () => {
               </template>
               <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
               <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+            </el-card>
+
+            <el-card v-if="taskDetail" class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>任务附件/任务资料</div>
+                  <div class="meta">可下载老师布置的资料</div>
+                </div>
+              </template>
+              <template v-if="!isMobile">
+                <el-table :data="taskDetail.attachments || []" size="small" empty-text="暂无任务附件">
+                  <el-table-column prop="fileName" label="文件名" min-width="280" />
+                  <el-table-column prop="fileSize" label="大小(Byte)" width="120" />
+                  <el-table-column prop="uploadedAt" label="上传时间" min-width="180" />
+                  <el-table-column label="操作" width="200">
+                    <template #default="{ row }: { row: TaskAttachmentVO }">
+                      <el-button size="small" @click="downloadTaskAttachment(row)">下载</el-button>
+                      <el-button size="small" @click="previewTaskAttachment(row)">预览</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+              <template v-else>
+                <div v-if="(taskDetail.attachments || []).length === 0" class="meta">暂无任务附件</div>
+                <el-card v-else v-for="att in taskDetail.attachments || []" :key="att.id" shadow="never" class="attCard">
+                  <div class="attName">{{ att.fileName }}</div>
+                  <div class="meta" style="margin-top: 6px">大小：{{ att.fileSize }} Byte</div>
+                  <div class="meta">上传时间：{{ att.uploadedAt }}</div>
+                  <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap">
+                    <el-button size="small" @click="downloadTaskAttachment(att)">下载</el-button>
+                    <el-button size="small" @click="previewTaskAttachment(att)">预览</el-button>
+                  </div>
+                </el-card>
+              </template>
             </el-card>
 
             <el-card class="block" shadow="never" v-if="selectedTaskId">

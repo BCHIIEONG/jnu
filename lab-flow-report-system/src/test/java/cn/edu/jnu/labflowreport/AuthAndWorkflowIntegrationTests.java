@@ -2,6 +2,7 @@ package cn.edu.jnu.labflowreport;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -176,6 +177,131 @@ class AuthAndWorkflowIntegrationTests {
                     assertTrue((bytes[2] & 0xFF) == 0xBF);
                 })
                 .andExpect(content().string(containsString("# 报告")));
+    }
+
+    @Test
+    void taskAttachmentsShouldUploadListDownloadAndDelete() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+        String studentToken = login("student", "student123");
+
+        MvcResult createTaskResult = mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"带资料的任务","description":"任务资料上传测试"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number taskIdNum = JsonPath.read(createTaskResult.getResponse().getContentAsString(), "$.data.id");
+        long taskId = taskIdNum.longValue();
+
+        MockMultipartFile file1 = new MockMultipartFile(
+                "files",
+                "guide.txt",
+                "text/plain",
+                "task guide".getBytes()
+        );
+        MockMultipartFile file2 = new MockMultipartFile(
+                "files",
+                "template.md",
+                "text/markdown",
+                "# template".getBytes()
+        );
+
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/tasks/" + taskId + "/attachments")
+                        .file(file1)
+                        .file(file2)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].fileName").value("guide.txt"))
+                .andReturn();
+
+        Number attachmentIdNum = JsonPath.read(uploadResult.getResponse().getContentAsString(), "$.data[0].id");
+        long attachmentId = attachmentIdNum.longValue();
+
+        mockMvc.perform(get("/api/tasks/" + taskId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.attachments.length()").value(2));
+
+        mockMvc.perform(get("/api/tasks/" + taskId + "/attachments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2));
+
+        mockMvc.perform(get("/api/task-attachments/" + attachmentId + "/download")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertTrue(result.getResponse().getContentAsByteArray().length > 0))
+                .andExpect(result -> assertTrue(result.getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION).contains("guide.txt")));
+
+        mockMvc.perform(delete("/api/tasks/" + taskId + "/attachments/" + attachmentId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/tasks/" + taskId + "/attachments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].fileName").value("template.md"));
+    }
+
+    @Test
+    void emptyTaskShouldBeDeletable() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+
+        MvcResult createTaskResult = mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"可删除任务","description":"删除测试"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number taskIdNum = JsonPath.read(createTaskResult.getResponse().getContentAsString(), "$.data.id");
+        long taskId = taskIdNum.longValue();
+
+        mockMvc.perform(delete("/api/tasks/" + taskId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/tasks/" + taskId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
+    @Test
+    void teacherShouldUpdateTaskTitle() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+
+        MvcResult createTaskResult = mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"旧任务名","description":"更新标题测试"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        Number taskIdNum = JsonPath.read(createTaskResult.getResponse().getContentAsString(), "$.data.id");
+        long taskId = taskIdNum.longValue();
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/tasks/" + taskId + "/title")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"新任务名"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.title").value("新任务名"));
     }
 
     private String login(String username, String password) throws Exception {

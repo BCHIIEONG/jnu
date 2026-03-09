@@ -7,10 +7,12 @@ import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskStatusUpdateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskTitleUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.service.ReportAttachmentService;
 import cn.edu.jnu.labflowreport.workflow.service.ReportWorkflowService;
 import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
 import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskAttachmentVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import jakarta.validation.Valid;
 import java.io.ByteArrayOutputStream;
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 @RestController
 @RequestMapping("/api")
@@ -64,6 +67,59 @@ public class ReportWorkflowController {
     public ApiResponse<TaskVO> getTask(@PathVariable Long taskId) {
         AuthenticatedUser user = SecurityUtils.currentUser();
         return ApiResponse.success(reportWorkflowService.getTaskForUser(taskId, user));
+    }
+
+    @GetMapping("/tasks/{taskId}/attachments")
+    public ApiResponse<List<TaskAttachmentVO>> listTaskAttachments(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(reportWorkflowService.listTaskAttachments(taskId, user));
+    }
+
+    @PostMapping(value = "/tasks/{taskId}/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<List<TaskAttachmentVO>> uploadTaskAttachments(
+            @PathVariable Long taskId,
+            @RequestParam(value = "files", required = false) MultipartFile[] files
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("任务附件上传成功", reportWorkflowService.uploadTaskAttachments(taskId, user, files));
+    }
+
+    @DeleteMapping("/tasks/{taskId}/attachments/{attachmentId}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<Void> deleteTaskAttachment(@PathVariable Long taskId, @PathVariable Long attachmentId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        reportWorkflowService.deleteTaskAttachment(taskId, attachmentId, user);
+        return ApiResponse.success("删除成功", null);
+    }
+
+    @GetMapping("/task-attachments/{attachmentId}/download")
+    public ResponseEntity<byte[]> downloadTaskAttachment(@PathVariable Long attachmentId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        ReportWorkflowService.DownloadData data = reportWorkflowService.downloadTaskAttachment(attachmentId, user);
+        String filename = data.filename() == null ? ("task-attachment-" + attachmentId) : data.filename();
+        MediaType contentType = data.contentType() == null || data.contentType().isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM
+                : MediaType.parseMediaType(data.contentType());
+        return ResponseEntity.status(HttpStatus.OK)
+                .contentType(contentType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(data.bytes());
+    }
+
+    @DeleteMapping("/tasks/{taskId}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<Void> deleteTask(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        reportWorkflowService.deleteTask(taskId, user);
+        return ApiResponse.success("任务已删除", null);
+    }
+
+    @PutMapping("/tasks/{taskId}/title")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<TaskVO> updateTaskTitle(@PathVariable Long taskId, @Valid @RequestBody TaskTitleUpdateRequest request) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("任务标题已更新", reportWorkflowService.updateTaskTitle(taskId, actor, request));
     }
 
     @PostMapping("/tasks/{taskId}/submissions")

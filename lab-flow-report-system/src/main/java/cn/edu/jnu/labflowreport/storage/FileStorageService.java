@@ -90,12 +90,40 @@ public class FileStorageService {
         return saveWithSha256(file, relative);
     }
 
+    public SaveResult saveTaskAttachmentWithSha256(Long taskId, MultipartFile file) {
+        if (taskId == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "taskId 不能为空");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "请选择要上传的文件");
+        }
+
+        String originalName = Objects.toString(file.getOriginalFilename(), "attachment");
+        String safeName = sanitizeFilename(originalName);
+        String ext = extractExt(safeName);
+        String storedName = UUID.randomUUID().toString().replace("-", "") + ext;
+        String relative = Path.of("task-attachments", String.valueOf(taskId), storedName).toString();
+        return saveWithSha256(file, relative);
+    }
+
     public byte[] readBytes(String relativePath) {
         Path target = resolveUnderBase(relativePath);
         try {
             return Files.readAllBytes(target);
         } catch (IOException e) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "附件文件不存在或无法读取");
+        }
+    }
+
+    public void delete(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return;
+        }
+        Path target = resolveUnderBase(relativePath);
+        try {
+            Files.deleteIfExists(target);
+        } catch (IOException e) {
+            throw new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "删除附件文件失败");
         }
     }
 

@@ -1,6 +1,7 @@
 package cn.edu.jnu.labflowreport.workflow.vo;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.Data;
 
 @Data
@@ -13,5 +14,5 @@ public class TaskVO {
     private LocalDateTime deadlineAt;
     private String status;
     private LocalDateTime createdAt;
+    private List<TaskAttachmentVO> attachments;
 }
-
