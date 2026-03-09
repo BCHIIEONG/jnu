@@ -16,12 +16,14 @@ import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysRoleEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.SysUserClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgDepartmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysRoleMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.SysUserClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserRoleMapper;
 import java.io.BufferedReader;
@@ -35,6 +37,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -52,6 +55,7 @@ public class AdminUserService {
     private final SysUserMapper sysUserMapper;
     private final SysRoleMapper sysRoleMapper;
     private final SysUserRoleMapper sysUserRoleMapper;
+    private final SysUserClassMapper sysUserClassMapper;
     private final OrgDepartmentMapper orgDepartmentMapper;
     private final OrgClassMapper orgClassMapper;
     private final PasswordEncoder passwordEncoder;
@@ -63,6 +67,7 @@ public class AdminUserService {
             SysUserMapper sysUserMapper,
             SysRoleMapper sysRoleMapper,
             SysUserRoleMapper sysUserRoleMapper,
+            SysUserClassMapper sysUserClassMapper,
             OrgDepartmentMapper orgDepartmentMapper,
             OrgClassMapper orgClassMapper,
             PasswordEncoder passwordEncoder,
@@ -73,6 +78,7 @@ public class AdminUserService {
         this.sysUserMapper = sysUserMapper;
         this.sysRoleMapper = sysRoleMapper;
         this.sysUserRoleMapper = sysUserRoleMapper;
+        this.sysUserClassMapper = sysUserClassMapper;
         this.orgDepartmentMapper = orgDepartmentMapper;
         this.orgClassMapper = orgClassMapper;
         this.passwordEncoder = passwordEncoder;
@@ -104,7 +110,12 @@ public class AdminUserService {
             wrapper.eq(SysUserEntity::getDepartmentId, departmentId);
         }
         if (classId != null) {
-            wrapper.eq(SysUserEntity::getClassId, classId);
+            List<Long> teacherIds = sysUserClassMapper.findUserIdsByClassId(classId);
+            if (teacherIds == null || teacherIds.isEmpty()) {
+                wrapper.eq(SysUserEntity::getClassId, classId);
+            } else {
+                wrapper.and(w -> w.eq(SysUserEntity::getClassId, classId).or().in(SysUserEntity::getId, teacherIds));
+            }
         }
 
         if (StringUtils.hasText(roleCode)) {
@@ -162,20 +173,24 @@ public class AdminUserService {
         entity.setDisplayName(safeTrim(request.displayName()));
         entity.setEnabled(request.enabled() == null ? Boolean.TRUE : request.enabled());
         entity.setDepartmentId(request.departmentId());
-        entity.setClassId(request.classId());
+        List<String> normalizedRoleCodes = normalizeRoleCodes(request.roleCodes());
+        validateRoleCombination(normalizedRoleCodes);
+        entity.setClassId(resolveSingleClassId(normalizedRoleCodes, request.classId()));
         entity.setPasswordHash(passwordEncoder.encode(StringUtils.hasText(request.password()) ? request.password() : DEFAULT_PASSWORD));
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         sysUserMapper.insert(entity);
 
-        setUserRolesInternal(entity.getId(), request.roleCodes());
+        setUserRolesInternal(entity.getId(), normalizedRoleCodes);
+        replaceTeacherClassBindings(entity.getId(), normalizedRoleCodes, normalizeClassIds(request.classIds(), request.classId()));
         Map<String, Object> detail = new HashMap<>();
         detail.put("username", entity.getUsername());
         detail.put("displayName", entity.getDisplayName());
         detail.put("enabled", entity.getEnabled());
         detail.put("departmentId", entity.getDepartmentId());
         detail.put("classId", entity.getClassId());
-        detail.put("roleCodes", request.roleCodes());
+        detail.put("classIds", normalizeClassIds(request.classIds(), request.classId()));
+        detail.put("roleCodes", normalizedRoleCodes);
         adminAuditService.record(actor, AdminAuditActions.USER_CREATE, "sys_user", entity.getId(), detail);
 
         return getUser(entity.getId());
@@ -187,6 +202,8 @@ public class AdminUserService {
         if (existing == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "用户不存在");
         }
+        List<String> roleCodes = normalizeRoleCodes(sysUserMapper.findRoleCodesByUserId(userId));
+        validateRoleCombination(roleCodes);
 
         LambdaUpdateWrapper<SysUserEntity> upd = new LambdaUpdateWrapper<SysUserEntity>()
                 .eq(SysUserEntity::getId, userId)
@@ -222,8 +239,19 @@ public class AdminUserService {
             changed.put("departmentId", request.departmentId());
         }
         if (request.classId() != null) {
+            if (roleCodes.contains("ROLE_TEACHER")) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "教师账号请使用多班级绑定");
+            }
             upd.set(SysUserEntity::getClassId, request.classId());
             changed.put("classId", request.classId());
+        }
+        if (request.classIds() != null) {
+            if (!roleCodes.contains("ROLE_TEACHER")) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "仅教师账号支持多班级绑定");
+            }
+            upd.set(SysUserEntity::getClassId, null);
+            replaceTeacherClassBindings(userId, roleCodes, normalizeClassIds(request.classIds(), request.classId()));
+            changed.put("classIds", normalizeClassIds(request.classIds(), request.classId()));
         }
 
         if (changed.isEmpty()) {
@@ -254,10 +282,12 @@ public class AdminUserService {
         if (existing == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "用户不存在");
         }
-        setUserRolesInternal(userId, roleCodes);
+        List<String> normalizedRoleCodes = normalizeRoleCodes(roleCodes);
+        validateRoleCombination(normalizedRoleCodes);
+        setUserRolesInternal(userId, normalizedRoleCodes);
         adminAuditService.record(actor, AdminAuditActions.USER_SET_ROLES, "sys_user", userId, Map.of(
                 "username", existing.getUsername(),
-                "roleCodes", roleCodes
+                "roleCodes", normalizedRoleCodes
         ));
     }
 
@@ -338,7 +368,8 @@ public class AdminUserService {
                     }
 
                     Long departmentId = resolveDepartmentId(departmentName);
-                    Long classId = resolveClassId(departmentId, className);
+                    List<Long> classIds = resolveClassIds(departmentId, className);
+                    Long classId = classIds.isEmpty() ? null : classIds.get(0);
 
                     SysUserEntity existing = sysUserMapper.findByUsername(username);
                     if (existing == null) {
@@ -349,11 +380,14 @@ public class AdminUserService {
                                 enabled == null ? Boolean.TRUE : enabled,
                                 departmentId,
                                 classId,
+                                classIds,
                                 roleCodes
                         );
                         createUser(actor, req);
                         created++;
                     } else {
+                        List<String> normalizedRoleCodes = normalizeRoleCodes(roleCodes);
+                        validateRoleCombination(normalizedRoleCodes);
                         LambdaUpdateWrapper<SysUserEntity> upd = new LambdaUpdateWrapper<SysUserEntity>()
                                 .eq(SysUserEntity::getId, existing.getId())
                                 .set(SysUserEntity::getDisplayName, displayName)
@@ -364,14 +398,17 @@ public class AdminUserService {
                         if (departmentId != null) {
                             upd.set(SysUserEntity::getDepartmentId, departmentId);
                         }
-                        if (classId != null) {
+                        if (normalizedRoleCodes.contains("ROLE_TEACHER")) {
+                            upd.set(SysUserEntity::getClassId, null);
+                        } else if (classId != null) {
                             upd.set(SysUserEntity::getClassId, classId);
                         }
                         if (StringUtils.hasText(password)) {
                             upd.set(SysUserEntity::getPasswordHash, passwordEncoder.encode(password));
                         }
                         sysUserMapper.update(null, upd);
-                        setUserRolesInternal(existing.getId(), roleCodes);
+                        setUserRolesInternal(existing.getId(), normalizedRoleCodes);
+                        replaceTeacherClassBindings(existing.getId(), normalizedRoleCodes, classIds);
                         adminAuditService.record(actor, AdminAuditActions.USER_UPDATE, "sys_user", existing.getId(), Map.of("import", true, "username", username));
                         updated++;
                     }
@@ -399,7 +436,7 @@ public class AdminUserService {
         List<AdminUserVO> vos = toUserVOs(users);
 
         StringBuilder csv = new StringBuilder();
-        csv.append("id,username,displayName,enabled,roleCodes,departmentId,departmentName,classId,className,createdAt\n");
+        csv.append("id,username,displayName,enabled,roleCodes,departmentId,departmentName,classId,className,classIds,classDisplayText,createdAt\n");
         for (AdminUserVO u : vos) {
             csv.append(AdminCsv.cell(u.id())).append(",");
             csv.append(AdminCsv.cell(u.username())).append(",");
@@ -410,6 +447,8 @@ public class AdminUserService {
             csv.append(AdminCsv.cell(u.departmentName())).append(",");
             csv.append(AdminCsv.cell(u.classId())).append(",");
             csv.append(AdminCsv.cell(u.className())).append(",");
+            csv.append(AdminCsv.cell(u.classIds() == null ? null : u.classIds().stream().map(String::valueOf).collect(Collectors.joining("|")))).append(",");
+            csv.append(AdminCsv.cell(u.classDisplayText())).append(",");
             csv.append(AdminCsv.cell(u.createdAt())).append("\n");
         }
 
@@ -421,11 +460,7 @@ public class AdminUserService {
         if (roleCodes == null || roleCodes.isEmpty()) {
             throw new BusinessException(ApiCode.BAD_REQUEST, "roleCodes 不能为空");
         }
-        List<String> normalized = roleCodes.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .toList();
+        List<String> normalized = normalizeRoleCodes(roleCodes);
         List<SysRoleEntity> roles = sysRoleMapper.selectList(new LambdaQueryWrapper<SysRoleEntity>().in(SysRoleEntity::getCode, normalized));
         if (roles.size() != normalized.size()) {
             throw new BusinessException(ApiCode.BAD_REQUEST, "roleCodes 包含未知角色");
@@ -446,6 +481,15 @@ public class AdminUserService {
         }
         Set<Long> deptIds = users.stream().map(SysUserEntity::getDepartmentId).filter(id -> id != null && id > 0).collect(Collectors.toSet());
         Set<Long> classIds = users.stream().map(SysUserEntity::getClassId).filter(id -> id != null && id > 0).collect(Collectors.toSet());
+        Map<Long, List<Long>> teacherClassIds = new HashMap<>();
+        for (SysUserEntity user : users) {
+            List<String> roleCodes = sysUserMapper.findRoleCodesByUserId(user.getId());
+            if (roleCodes != null && roleCodes.contains("ROLE_TEACHER")) {
+                List<Long> boundClassIds = sysUserClassMapper.findClassIdsByUserId(user.getId());
+                teacherClassIds.put(user.getId(), boundClassIds == null ? List.of() : boundClassIds);
+                classIds.addAll(teacherClassIds.get(user.getId()));
+            }
+        }
 
         Map<Long, String> deptNames = deptIds.isEmpty() ? Map.of() : orgDepartmentMapper.selectBatchIds(deptIds).stream()
                 .collect(Collectors.toMap(OrgDepartmentEntity::getId, OrgDepartmentEntity::getName));
@@ -455,7 +499,18 @@ public class AdminUserService {
         List<AdminUserVO> result = new ArrayList<>(users.size());
         for (SysUserEntity u : users) {
             List<String> roles = sysUserMapper.findRoleCodesByUserId(u.getId());
-            OrgClassEntity clazz = (u.getClassId() == null ? null : classes.get(u.getClassId()));
+            List<Long> boundClassIds = roles != null && roles.contains("ROLE_TEACHER")
+                    ? teacherClassIds.getOrDefault(u.getId(), List.of())
+                    : (u.getClassId() == null ? List.of() : List.of(u.getClassId()));
+            List<String> boundClassNames = boundClassIds.stream()
+                    .map(classes::get)
+                    .filter(Objects::nonNull)
+                    .map(c -> ClassDisplayUtils.effectiveDisplayName(c.getGrade(), c.getName()))
+                    .toList();
+            Long primaryClassId = roles != null && roles.contains("ROLE_TEACHER")
+                    ? (boundClassIds.isEmpty() ? null : boundClassIds.get(0))
+                    : u.getClassId();
+            String primaryClassName = boundClassNames.isEmpty() ? null : boundClassNames.get(0);
             result.add(new AdminUserVO(
                     u.getId(),
                     u.getUsername(),
@@ -463,14 +518,62 @@ public class AdminUserService {
                     u.getEnabled(),
                     u.getDepartmentId(),
                     u.getDepartmentId() == null ? null : deptNames.get(u.getDepartmentId()),
-                    u.getClassId(),
-                    clazz == null ? null : ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()),
+                    primaryClassId,
+                    primaryClassName,
+                    boundClassIds,
+                    boundClassNames,
+                    String.join(" / ", boundClassNames),
                     roles == null ? List.of() : roles,
                     u.getCreatedAt(),
                     u.getUpdatedAt()
-            ));
+                ));
         }
         return result;
+    }
+
+    private void replaceTeacherClassBindings(Long userId, List<String> roleCodes, List<Long> classIds) {
+        sysUserClassMapper.delete(new LambdaQueryWrapper<SysUserClassEntity>().eq(SysUserClassEntity::getUserId, userId));
+        if (!roleCodes.contains("ROLE_TEACHER")) {
+            return;
+        }
+        for (Long classId : classIds) {
+            SysUserClassEntity binding = new SysUserClassEntity();
+            binding.setUserId(userId);
+            binding.setClassId(classId);
+            binding.setCreatedAt(LocalDateTime.now());
+            sysUserClassMapper.insert(binding);
+        }
+    }
+
+    private static List<String> normalizeRoleCodes(List<String> roleCodes) {
+        if (roleCodes == null) {
+            return List.of();
+        }
+        return roleCodes.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
+    private static void validateRoleCombination(List<String> roleCodes) {
+        if (roleCodes.contains("ROLE_TEACHER") && roleCodes.contains("ROLE_STUDENT")) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "暂不支持同时拥有教师和学生角色");
+        }
+    }
+
+    private static List<Long> normalizeClassIds(List<Long> classIds, Long classId) {
+        if (classIds != null && !classIds.isEmpty()) {
+            return classIds.stream().filter(Objects::nonNull).distinct().toList();
+        }
+        if (classId != null) {
+            return List.of(classId);
+        }
+        return List.of();
+    }
+
+    private static Long resolveSingleClassId(List<String> roleCodes, Long classId) {
+        return roleCodes.contains("ROLE_TEACHER") ? null : classId;
     }
 
     private static String safeTrim(String s) {
@@ -581,21 +684,26 @@ public class AdminUserService {
         return dep == null ? null : dep.getId();
     }
 
-    private Long resolveClassId(Long departmentId, String className) {
-        if (departmentId == null || !StringUtils.hasText(className)) {
-            return null;
+    private List<Long> resolveClassIds(Long departmentId, String classNamesText) {
+        if (departmentId == null || !StringUtils.hasText(classNamesText)) {
+            return List.of();
         }
-        String wanted = className.trim();
         List<OrgClassEntity> classes = orgClassMapper.selectList(new LambdaQueryWrapper<OrgClassEntity>()
                 .eq(OrgClassEntity::getDepartmentId, departmentId));
-        for (OrgClassEntity clazz : classes) {
-            if (wanted.equals(clazz.getName())) {
-                return clazz.getId();
-            }
-            if (wanted.equals(ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()))) {
-                return clazz.getId();
+        List<String> wantedNames = List.of(classNamesText.trim().replace("；", "|").replace(",", "|").split("\\|")).stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        List<Long> resolved = new ArrayList<>();
+        for (String wanted : wantedNames) {
+            for (OrgClassEntity clazz : classes) {
+                if (wanted.equals(clazz.getName()) || wanted.equals(ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()))) {
+                    resolved.add(clazz.getId());
+                    break;
+                }
             }
         }
-        return null;
+        return resolved.stream().distinct().toList();
     }
 }

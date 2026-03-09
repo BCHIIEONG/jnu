@@ -5,6 +5,7 @@ public record AdminUserUpdateRequest(
         String displayName,
         Boolean enabled,
         Long departmentId,
-        Long classId
+        Long classId,
+        java.util.List<Long> classIds
 ) {
 }

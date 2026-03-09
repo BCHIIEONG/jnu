@@ -233,6 +233,104 @@ class AdminIntegrationTests {
                 .andExpect(jsonPath("$.code").value(40000));
     }
 
+    @Test
+    void teacherShouldSupportMultipleClassesWhileStudentRemainsSingleClass() throws Exception {
+        String adminToken = login("admin", "admin123");
+
+        MvcResult depResult = mockMvc.perform(post("/api/admin/departments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"教师多班院系-" + Instant.now().getEpochSecond() + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long depId = ((Number) JsonPath.read(depResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MvcResult class1 = mockMvc.perform(post("/api/admin/classes")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"departmentId\":" + depId + ",\"grade\":2022,\"name\":\"软件工程1班\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long classId1 = ((Number) JsonPath.read(class1.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MvcResult class2 = mockMvc.perform(post("/api/admin/classes")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"departmentId\":" + depId + ",\"grade\":2022,\"name\":\"软件工程2班\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        long classId2 = ((Number) JsonPath.read(class2.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        String teacherUsername = "tm" + Instant.now().getEpochSecond();
+        MvcResult teacherResult = mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"多班教师",
+                                  "enabled":true,
+                                  "departmentId":%d,
+                                  "classIds":[%d,%d],
+                                  "roleCodes":["ROLE_TEACHER"]
+                                }
+                                """.formatted(teacherUsername, depId, classId1, classId2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.classIds.length()").value(2))
+                .andExpect(jsonPath("$.data.classDisplayText").value(containsString("2022级软件工程1班")))
+                .andExpect(jsonPath("$.data.classDisplayText").value(containsString("2022级软件工程2班")))
+                .andReturn();
+        long teacherId = ((Number) JsonPath.read(teacherResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .param("classId", String.valueOf(classId2))
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(greaterThan(0)))
+                .andExpect(content().string(containsString(teacherUsername)));
+
+        mockMvc.perform(put("/api/admin/users/" + teacherId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "displayName":"多班教师已更新",
+                                  "departmentId":%d,
+                                  "classIds":[%d]
+                                }
+                                """.formatted(depId, classId2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.classIds.length()").value(1))
+                .andExpect(jsonPath("$.data.classIds[0]").value(classId2));
+
+        String studentUsername = "sm" + Instant.now().getEpochSecond();
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"单班学生",
+                                  "enabled":true,
+                                  "departmentId":%d,
+                                  "classId":%d,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(studentUsername, depId, classId1)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.classId").value(classId1))
+                .andExpect(jsonPath("$.data.classIds.length()").value(1));
+
+        mockMvc.perform(get("/api/admin/users/export")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("classIds")))
+                .andExpect(content().string(containsString(teacherUsername)))
+                .andExpect(content().string(containsString("2022级软件工程2班")));
+    }
+
     private String login(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

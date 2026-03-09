@@ -12,9 +12,11 @@ public record AdminUserVO(
         String departmentName,
         Long classId,
         String className,
+        List<Long> classIds,
+        List<String> classNames,
+        String classDisplayText,
         List<String> roleCodes,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
 }
-

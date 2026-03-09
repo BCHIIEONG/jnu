@@ -13,8 +13,8 @@ public record AdminUserCreateRequest(
         Boolean enabled,
         Long departmentId,
         Long classId,
+        List<Long> classIds,
         @NotEmpty(message = "roleCodes 不能为空")
         List<String> roleCodes
 ) {
 }
-

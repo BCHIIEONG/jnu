@@ -17,6 +17,9 @@ type UserItem = {
   departmentName?: string | null
   classId?: number | null
   className?: string | null
+  classIds?: number[]
+  classNames?: string[]
+  classDisplayText?: string | null
   roleCodes: string[]
   createdAt: string
   updatedAt: string
@@ -46,6 +49,10 @@ const filteredClasses = computed(() => {
   if (!query.departmentId) return classes.value
   return classes.value.filter((c) => c.departmentId === query.departmentId)
 })
+function filterClassesByDepartment(departmentId?: number) {
+  if (!departmentId) return classes.value
+  return classes.value.filter((c) => c.departmentId === departmentId)
+}
 
 const createDialog = ref(false)
 const editDialog = ref(false)
@@ -58,6 +65,7 @@ const createForm = reactive({
   enabled: true,
   departmentId: undefined as number | undefined,
   classId: undefined as number | undefined,
+  classIds: [] as number[],
   roleCodes: ['ROLE_STUDENT'] as string[],
 })
 
@@ -68,6 +76,7 @@ const editForm = reactive({
   enabled: true,
   departmentId: undefined as number | undefined,
   classId: undefined as number | undefined,
+  classIds: [] as number[],
 })
 
 const rolesTarget = ref<UserItem | null>(null)
@@ -77,6 +86,14 @@ const rolesForm = reactive({
 
 const importFile = ref<File | null>(null)
 const importing = ref(false)
+
+function hasRole(roleCodes: string[], roleCode: string) {
+  return (roleCodes ?? []).includes(roleCode)
+}
+const createIsTeacher = computed(() => hasRole(createForm.roleCodes, 'ROLE_TEACHER'))
+const createIsStudent = computed(() => hasRole(createForm.roleCodes, 'ROLE_STUDENT'))
+const editIsTeacher = computed(() => hasRole(editTarget.value?.roleCodes ?? [], 'ROLE_TEACHER'))
+const editIsStudent = computed(() => hasRole(editTarget.value?.roleCodes ?? [], 'ROLE_STUDENT'))
 
 async function loadMeta() {
   metaLoading.value = true
@@ -131,11 +148,16 @@ async function openCreate() {
   createForm.enabled = true
   createForm.departmentId = undefined
   createForm.classId = undefined
+  createForm.classIds = []
   createForm.roleCodes = ['ROLE_STUDENT']
   createDialog.value = true
 }
 
 async function submitCreate() {
+  if (createIsTeacher.value && createIsStudent.value) {
+    ElMessage.error('暂不支持同时拥有教师和学生角色')
+    return
+  }
   try {
     await apiData<UserItem>(
       '/api/admin/users',
@@ -147,7 +169,8 @@ async function submitCreate() {
           password: createForm.password || undefined,
           enabled: createForm.enabled,
           departmentId: createForm.departmentId ?? null,
-          classId: createForm.classId ?? null,
+          classId: createIsTeacher.value ? null : createForm.classId ?? null,
+          classIds: createIsTeacher.value ? createForm.classIds : [],
           roleCodes: createForm.roleCodes,
         },
       },
@@ -175,11 +198,16 @@ async function openEdit(u: UserItem) {
   editForm.enabled = u.enabled
   editForm.departmentId = (u.departmentId ?? undefined) as any
   editForm.classId = (u.classId ?? undefined) as any
+  editForm.classIds = [...(u.classIds ?? (u.classId ? [u.classId] : []))]
   editDialog.value = true
 }
 
 async function submitEdit() {
   if (!editTarget.value) return
+  if (editIsTeacher.value && editIsStudent.value) {
+    ElMessage.error('暂不支持同时拥有教师和学生角色')
+    return
+  }
   try {
     await apiData<UserItem>(
       `/api/admin/users/${editTarget.value.id}`,
@@ -190,7 +218,8 @@ async function submitEdit() {
           displayName: editForm.displayName,
           enabled: editForm.enabled,
           departmentId: editForm.departmentId ?? null,
-          classId: editForm.classId ?? null,
+          classId: editIsTeacher.value ? null : editForm.classId ?? null,
+          classIds: editIsTeacher.value ? editForm.classIds : [],
         },
       },
       token.value,
@@ -212,6 +241,10 @@ function openRoles(u: UserItem) {
 
 async function submitRoles() {
   if (!rolesTarget.value) return
+  if (hasRole(rolesForm.roleCodes, 'ROLE_TEACHER') && hasRole(rolesForm.roleCodes, 'ROLE_STUDENT')) {
+    ElMessage.error('暂不支持同时拥有教师和学生角色')
+    return
+  }
   try {
     await apiData<void>(
       `/api/admin/users/${rolesTarget.value.id}/roles`,
@@ -311,9 +344,11 @@ function onDepartmentChangeInQuery() {
 }
 function onDepartmentChangeInCreate() {
   createForm.classId = undefined
+  createForm.classIds = []
 }
 function onDepartmentChangeInEdit() {
   editForm.classId = undefined
+  editForm.classIds = []
 }
 
 onMounted(async () => {
@@ -351,7 +386,7 @@ onMounted(async () => {
       <el-button type="success" :loading="importing" @click="importUsers">导入</el-button>
       <div class="hint">
         CSV 列: <code>username</code>, <code>displayName</code> 必填; 可选 <code>password</code>, <code>enabled</code>,
-        <code>roleCodes</code>, <code>departmentName</code>, <code>className</code>
+        <code>roleCodes</code>, <code>departmentName</code>, <code>className</code>（教师可用 <code>|</code> 分隔多个班级）
       </div>
     </div>
 
@@ -370,7 +405,7 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="departmentName" label="院系" width="160" />
-      <el-table-column prop="className" label="班级" width="220" />
+      <el-table-column prop="classDisplayText" label="班级" width="320" show-overflow-tooltip />
       <el-table-column label="操作" width="330" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -413,8 +448,20 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="班级">
-          <el-select v-model="createForm.classId" :loading="metaLoading" clearable style="width: 100%">
-            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
+          <el-select
+            v-if="createIsTeacher"
+            v-model="createForm.classIds"
+            :loading="metaLoading"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%"
+          >
+            <el-option v-for="c in filterClassesByDepartment(createForm.departmentId)" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
+          </el-select>
+          <el-select v-else v-model="createForm.classId" :loading="metaLoading" clearable style="width: 100%">
+            <el-option v-for="c in filterClassesByDepartment(createForm.departmentId)" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="roleCodes">
@@ -449,8 +496,20 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="班级">
-          <el-select v-model="editForm.classId" :loading="metaLoading" clearable style="width: 100%">
-            <el-option v-for="c in filteredClasses" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
+          <el-select
+            v-if="editIsTeacher"
+            v-model="editForm.classIds"
+            :loading="metaLoading"
+            multiple
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            style="width: 100%"
+          >
+            <el-option v-for="c in filterClassesByDepartment(editForm.departmentId)" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
+          </el-select>
+          <el-select v-else v-model="editForm.classId" :loading="metaLoading" clearable style="width: 100%">
+            <el-option v-for="c in filterClassesByDepartment(editForm.departmentId)" :key="c.id" :label="`${c.departmentName} / ${c.displayName}`" :value="c.id" />
           </el-select>
         </el-form-item>
       </el-form>
