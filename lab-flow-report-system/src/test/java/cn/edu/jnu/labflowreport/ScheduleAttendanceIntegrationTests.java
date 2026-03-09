@@ -56,7 +56,12 @@ class ScheduleAttendanceIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
-        Number teacherIdNum = JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items[0].id");
+        java.util.List<java.util.Map<String, Object>> teacherItems = JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items");
+        Number teacherIdNum = teacherItems.stream()
+                .filter(item -> "teacher".equals(item.get("username")))
+                .map(item -> (Number) item.get("id"))
+                .findFirst()
+                .orElseThrow();
         long teacherId = teacherIdNum.longValue();
 
         // Create an extra student in the same class who will NOT check in (to verify "not checked in" export rows).
@@ -88,6 +93,23 @@ class ScheduleAttendanceIntegrationTests {
                                   "enabled":true,
                                   "classId":%d,
                                   "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(classId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        // Create a teacher bound to the same class; roster/history must still only count students.
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"teacher_in_class",
+                                  "displayName":"Teacher In Class",
+                                  "password":"teacher123",
+                                  "enabled":true,
+                                  "classId":%d,
+                                  "roleCodes":["ROLE_TEACHER"]
                                 }
                                 """.formatted(classId)))
                 .andExpect(status().isOk())
@@ -303,9 +325,28 @@ class ScheduleAttendanceIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.totalCount").value(org.hamcrest.Matchers.greaterThan(0)))
+                .andExpect(jsonPath("$.data.totalCount").value(org.hamcrest.Matchers.greaterThanOrEqualTo(3)))
                 .andExpect(content().string(containsString("student_absent")))
-                .andExpect(content().string(containsString("NOT_CHECKED_IN")));
+                .andExpect(content().string(containsString("NOT_CHECKED_IN")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("teacher_in_class"))));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .param("grade", "2022")
+                        .param("status", "CLOSED")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(org.hamcrest.Matchers.greaterThan(0)))
+                .andExpect(content().string(containsString("签到演示课")));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions/" + sessionId + "/detail")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.totalCount").value(org.hamcrest.Matchers.greaterThanOrEqualTo(3)))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("teacher_in_class"))));
     }
 
     @Test
@@ -327,7 +368,12 @@ class ScheduleAttendanceIntegrationTests {
                         .param("size", "20"))
                 .andExpect(status().isOk())
                 .andReturn();
-        long teacherId = ((Number) JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items[0].id")).longValue();
+        java.util.List<java.util.Map<String, Object>> teacherItems = JsonPath.read(teacherUsers.getResponse().getContentAsString(), "$.data.items");
+        long teacherId = teacherItems.stream()
+                .filter(item -> "teacher".equals(item.get("username")))
+                .map(item -> ((Number) item.get("id")).longValue())
+                .findFirst()
+                .orElseThrow();
 
         MvcResult studentUsers = mockMvc.perform(get("/api/admin/users")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
@@ -450,6 +496,56 @@ class ScheduleAttendanceIntegrationTests {
                         .param("weekStartDate", "2026-02-24"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(containsString("当前账号未绑定班级")));
+    }
+
+    @Test
+    void teacherWeekScheduleShouldFallbackToDemoSchedulesWhenCurrentTeacherHasNoAssignedRows() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+
+        MvcResult semesters = mockMvc.perform(get("/api/admin/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        java.util.List<java.util.Map<String, Object>> semesterItems = JsonPath.read(semesters.getResponse().getContentAsString(), "$.data");
+        long semesterId = semesterItems.stream()
+                .filter(item -> "2025-2026-2".equals(item.get("name")))
+                .map(item -> ((Number) item.get("id")).longValue())
+                .findFirst()
+                .orElseThrow();
+
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"teacher_extra",
+                                  "displayName":"Extra Teacher",
+                                  "password":"teacher123",
+                                  "enabled":true,
+                                  "roleCodes":["ROLE_TEACHER"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        String extraTeacherToken = login("teacher_extra", "teacher123");
+
+        mockMvc.perform(get("/api/teacher/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .param("semesterId", String.valueOf(semesterId))
+                        .param("weekStartDate", "2026-03-09"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(content().string(containsString("线性代数引论")));
+
+        mockMvc.perform(get("/api/teacher/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + extraTeacherToken)
+                        .param("semesterId", String.valueOf(semesterId))
+                        .param("weekStartDate", "2026-03-09"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(content().string(containsString("线性代数引论")));
     }
 
     private String login(String username, String password) throws Exception {

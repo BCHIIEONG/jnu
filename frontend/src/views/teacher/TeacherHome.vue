@@ -101,6 +101,82 @@ type AttendanceHistoryStudent = {
 type AttendanceHistoryDetail = AttendanceHistoryItem & {
   roster: AttendanceHistoryStudent[]
 }
+type ProgressAttachmentVO = {
+  id: number
+  progressLogId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedAt: string
+}
+type TaskProgressVO = {
+  id: number
+  taskId: number
+  studentId: number
+  stepNo: number
+  content?: string | null
+  createdAt: string
+  attachments: ProgressAttachmentVO[]
+}
+type TaskCompletionVO = {
+  taskId: number
+  studentId: number
+  status: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  requestedAt?: string | null
+  confirmedAt?: string | null
+  confirmedBy?: number | null
+  confirmedByDisplayName?: string | null
+}
+type TeacherTaskProgressStudentVO = {
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  classDisplayName?: string | null
+  progressCount: number
+  completionStatus: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  latestUpdatedAt?: string | null
+  requestedAt?: string | null
+  confirmedAt?: string | null
+}
+type TeacherTaskProgressDetailVO = {
+  taskId: number
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  classDisplayName?: string | null
+  completionStatus: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  requestedAt?: string | null
+  confirmedAt?: string | null
+  confirmedByDisplayName?: string | null
+  logs: TaskProgressVO[]
+}
+type TaskDeviceConfigVO = {
+  deviceId: number
+  deviceCode: string
+  deviceName: string
+  deviceStatus: string
+  totalQuantity: number
+  configuredQuantity: number
+  reservedQuantity: number
+  availableQuantity: number
+}
+type TaskDeviceRequestVO = {
+  id: number
+  taskId: number
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  deviceId: number
+  deviceCode: string
+  deviceName: string
+  quantity: number
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'BORROWED' | 'RETURNED'
+  note?: string | null
+  createdAt: string
+  approvedAt?: string | null
+  checkoutAt?: string | null
+  returnAt?: string | null
+}
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -108,7 +184,8 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'report' | 'schedule' | 'history'>('report')
+const activeTab = ref<'flow' | 'report' | 'schedule' | 'history'>('flow')
+const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
 const loadingTasks = ref(false)
@@ -160,6 +237,24 @@ const previewUrl = ref<string | null>(null)
 const previewTitle = ref('')
 const previewKind = ref<'image' | 'text'>('image')
 const previewText = ref<string>('')
+const progressStudents = ref<TeacherTaskProgressStudentVO[]>([])
+const loadingProgressStudents = ref(false)
+const progressStudentQ = ref('')
+const progressDetailDialog = ref(false)
+const progressDetailLoading = ref(false)
+const progressDetail = ref<TeacherTaskProgressDetailVO | null>(null)
+const progressImageUrls = ref<Record<number, string>>({})
+const confirmingCompletion = ref<number | null>(null)
+const taskDevices = ref<TaskDeviceConfigVO[]>([])
+const loadingTaskDevices = ref(false)
+const deviceConfigDialog = ref(false)
+const deviceConfigDraft = ref<Array<{ deviceId: number; deviceName: string; deviceCode: string; totalQuantity: number; deviceStatus: string; maxQuantity: number }>>([])
+const savingTaskDevices = ref(false)
+const deviceRequests = ref<TaskDeviceRequestVO[]>([])
+const loadingDeviceRequests = ref(false)
+const deviceRequestQ = ref('')
+const deviceRequestStatus = ref('')
+const actioningRequestId = ref<number | null>(null)
 
 // Schedule/attendance state
 const semesters = ref<Semester[]>([])
@@ -168,6 +263,7 @@ const scheduleSemesterId = ref<number | null>(null)
 const weekStartDate = ref<string>(toYmd(new Date()))
 const weekItems = ref<WeekScheduleItem[]>([])
 const loadingWeek = ref(false)
+const scheduleError = ref('')
 
 const classDialog = ref(false)
 const selectedCell = ref<WeekScheduleItem | null>(null)
@@ -376,6 +472,31 @@ function parseTime(s: string | undefined | null): number {
   return Number.isFinite(t) ? t : 0
 }
 
+function completionStatusText(status?: TeacherTaskProgressStudentVO['completionStatus'] | TaskCompletionVO['status']) {
+  if (status === 'PENDING_CONFIRM') return '待确认'
+  if (status === 'CONFIRMED') return '已确认'
+  return '未登记'
+}
+
+function completionStatusType(status?: TeacherTaskProgressStudentVO['completionStatus'] | TaskCompletionVO['status']) {
+  if (status === 'PENDING_CONFIRM') return 'warning'
+  if (status === 'CONFIRMED') return 'success'
+  return 'info'
+}
+
+function isImageLike(name?: string | null, contentType?: string | null) {
+  const ct = (contentType ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  return ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(n)
+}
+
+function revokeProgressImageUrls() {
+  for (const v of Object.values(progressImageUrls.value)) {
+    if (v) URL.revokeObjectURL(v)
+  }
+  progressImageUrls.value = {}
+}
+
 const submissionGroups = computed<SubmissionGroup[]>(() => {
   const by = new Map<string, SubmissionGroup>()
   for (const s of submissions.value) {
@@ -450,6 +571,14 @@ async function loadTasks() {
 async function selectTask(taskId: number) {
   selectedTaskId.value = taskId
   taskDetail.value = await apiData<TaskVO>(`/api/tasks/${taskId}`, { method: 'GET' }, auth.token)
+  if (activeTab.value === 'report') {
+    await loadSubmissions()
+    return
+  }
+  if (activeTab.value === 'flow') {
+    await Promise.all([loadProgressStudents(), loadTaskDevices(), loadDeviceRequests()])
+    return
+  }
   await loadSubmissions()
 }
 
@@ -464,6 +593,264 @@ async function loadSubmissions() {
     )
   } finally {
     loadingSubs.value = false
+  }
+}
+
+async function loadProgressStudents() {
+  if (!selectedTaskId.value) return
+  loadingProgressStudents.value = true
+  try {
+    const q = progressStudentQ.value.trim()
+    const query = q ? `?q=${encodeURIComponent(q)}` : ''
+    progressStudents.value = await apiData<TeacherTaskProgressStudentVO[]>(
+      `/api/teacher/tasks/${selectedTaskId.value}/progress${query}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    progressStudents.value = []
+    ElMessage.error(e?.message ?? '加载实验过程失败')
+  } finally {
+    loadingProgressStudents.value = false
+  }
+}
+
+async function ensureProgressDetailImageUrls(logs: TaskProgressVO[]) {
+  revokeProgressImageUrls()
+  for (const log of logs) {
+    for (const att of log.attachments || []) {
+      if (!isImageLike(att.fileName, att.contentType)) continue
+      try {
+        const { blob } = await fetchBlob(`/api/progress-attachments/${att.id}/download`, { token: auth.token })
+        progressImageUrls.value[att.id] = URL.createObjectURL(blob)
+      } catch {
+        // ignore preview failures
+      }
+    }
+  }
+}
+
+async function openProgressDetail(row: TeacherTaskProgressStudentVO) {
+  if (!selectedTaskId.value) return
+  progressDetailDialog.value = true
+  progressDetailLoading.value = true
+  progressDetail.value = null
+  try {
+    progressDetail.value = await apiData<TeacherTaskProgressDetailVO>(
+      `/api/teacher/tasks/${selectedTaskId.value}/progress/${row.studentId}`,
+      { method: 'GET' },
+      auth.token,
+    )
+    await ensureProgressDetailImageUrls(progressDetail.value.logs || [])
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加载学生过程失败')
+    progressDetailDialog.value = false
+  } finally {
+    progressDetailLoading.value = false
+  }
+}
+
+async function confirmCompletion(row: TeacherTaskProgressStudentVO) {
+  if (!selectedTaskId.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认 ${row.studentDisplayName}（${row.studentUsername}）已完成全部实验步骤并登记？`,
+      '确认登记',
+      { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  confirmingCompletion.value = row.studentId
+  try {
+    await apiData(
+      `/api/teacher/tasks/${selectedTaskId.value}/completion/${row.studentId}/confirm`,
+      { method: 'POST' },
+      auth.token,
+    )
+    ElMessage.success('已确认登记')
+    await loadProgressStudents()
+    if (progressDetail.value?.studentId === row.studentId) {
+      await openProgressDetail(row)
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '确认失败')
+  } finally {
+    confirmingCompletion.value = null
+  }
+}
+
+async function loadTaskDevices() {
+  if (!selectedTaskId.value) return
+  loadingTaskDevices.value = true
+  try {
+    taskDevices.value = await apiData<TaskDeviceConfigVO[]>(
+      `/api/teacher/tasks/${selectedTaskId.value}/devices`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    taskDevices.value = []
+    ElMessage.error(e?.message ?? '加载任务设备配置失败')
+  } finally {
+    loadingTaskDevices.value = false
+  }
+}
+
+function openDeviceConfigDialog() {
+  deviceConfigDraft.value = taskDevices.value.map((item) => ({
+    deviceId: item.deviceId,
+    deviceName: item.deviceName,
+    deviceCode: item.deviceCode,
+    totalQuantity: item.totalQuantity,
+    deviceStatus: item.deviceStatus,
+    maxQuantity: item.configuredQuantity,
+  }))
+  deviceConfigDialog.value = true
+}
+
+async function saveTaskDevices() {
+  if (!selectedTaskId.value) return
+  savingTaskDevices.value = true
+  try {
+    await apiData(
+      `/api/teacher/tasks/${selectedTaskId.value}/devices`,
+      {
+        method: 'PUT',
+        body: deviceConfigDraft.value.map((item) => ({
+          deviceId: item.deviceId,
+          maxQuantity: Math.max(0, Math.floor(Number(item.maxQuantity || 0))),
+        })),
+      },
+      auth.token,
+    )
+    ElMessage.success('任务设备配置已更新')
+    deviceConfigDialog.value = false
+    await loadTaskDevices()
+    await loadDeviceRequests()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '保存配置失败')
+  } finally {
+    savingTaskDevices.value = false
+  }
+}
+
+async function loadDeviceRequests() {
+  if (!selectedTaskId.value) return
+  loadingDeviceRequests.value = true
+  try {
+    const q = new URLSearchParams()
+    if (deviceRequestStatus.value) q.set('status', deviceRequestStatus.value)
+    if (deviceRequestQ.value.trim()) q.set('q', deviceRequestQ.value.trim())
+    const suffix = q.toString() ? `?${q.toString()}` : ''
+    deviceRequests.value = await apiData<TaskDeviceRequestVO[]>(
+      `/api/teacher/tasks/${selectedTaskId.value}/device-requests${suffix}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    deviceRequests.value = []
+    ElMessage.error(e?.message ?? '加载设备申请失败')
+  } finally {
+    loadingDeviceRequests.value = false
+  }
+}
+
+async function changeDeviceRequestStatus(
+  row: TaskDeviceRequestVO,
+  action: 'approve' | 'reject' | 'checkout' | 'return',
+  successMessage: string,
+) {
+  const actionTextMap = {
+    approve: '通过',
+    reject: '驳回',
+    checkout: '登记借出',
+    return: '登记归还',
+  } as const
+  try {
+    await ElMessageBox.confirm(
+      `确认对 ${row.studentDisplayName}（${row.studentUsername}）的设备申请执行“${actionTextMap[action]}”吗？`,
+      '确认操作',
+      { type: action === 'reject' ? 'warning' : 'info', confirmButtonText: '确认', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  actioningRequestId.value = row.id
+  try {
+    await apiData(`/api/teacher/device-requests/${row.id}/${action}`, { method: 'POST' }, auth.token)
+    ElMessage.success(successMessage)
+    await loadTaskDevices()
+    await loadDeviceRequests()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '操作失败')
+  } finally {
+    actioningRequestId.value = null
+  }
+}
+
+async function exportDeviceRequests() {
+  if (!selectedTaskId.value) return
+  try {
+    await downloadBlob(`/api/teacher/tasks/${selectedTaskId.value}/device-requests/export`, {
+      token: auth.token,
+      fallbackFilename: `task-${selectedTaskId.value}-device-requests.csv`,
+    })
+    ElMessage.success('已开始下载借用记录 CSV')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '导出失败')
+  }
+}
+
+async function previewProgressAttachment(row: ProgressAttachmentVO) {
+  try {
+    closePreview()
+    const { blob, contentType } = await fetchBlob(`/api/progress-attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
+  }
+}
+
+async function downloadProgressAttachment(row: ProgressAttachmentVO) {
+  try {
+    await downloadBlob(`/api/progress-attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `progress-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
   }
 }
 
@@ -774,12 +1161,22 @@ async function confirmSetTaskStatus(status: 'OPEN' | 'CLOSED') {
 onMounted(loadTasks)
 
 watch(activeTab, async (tab) => {
+  if (tab === 'flow') {
+    if (selectedTaskId.value) {
+      await Promise.all([loadProgressStudents(), loadTaskDevices(), loadDeviceRequests()])
+    }
+    return
+  }
+  if (tab === 'report') {
+    if (selectedTaskId.value) {
+      await loadSubmissions()
+    }
+    return
+  }
   if (tab === 'schedule') {
-    if (semesters.value.length > 0 && timeSlots.value.length > 0) return
     try {
-      semesters.value = await apiData<Semester[]>('/api/teacher/semesters', { method: 'GET' }, auth.token)
-      timeSlots.value = await apiData<TimeSlot[]>('/api/teacher/time-slots', { method: 'GET' }, auth.token)
-      scheduleSemesterId.value = scheduleSemesterId.value ?? semesters.value[0]?.id ?? null
+      await ensureScheduleMeta()
+      await loadWeek()
     } catch (e: any) {
       ElMessage.error(e?.message ?? '加载课表元数据失败')
     }
@@ -797,6 +1194,7 @@ watch(activeTab, async (tab) => {
 
 onBeforeUnmount(() => {
   stopLoops()
+  revokeProgressImageUrls()
 })
 
 function toYmd(d: Date): string {
@@ -816,6 +1214,47 @@ function addDays(ymd: string, days: number): string {
   const date = new Date(y, m - 1, d)
   date.setDate(date.getDate() + days)
   return toYmd(date)
+}
+
+function getWeekStartYmd(date: Date): string {
+  const copy = new Date(date)
+  const day = copy.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  copy.setDate(copy.getDate() + diff)
+  return toYmd(copy)
+}
+
+function semesterContainsDate(semester: Semester, ymd: string) {
+  if (!semester.startDate || !semester.endDate) return false
+  return semester.startDate <= ymd && ymd <= semester.endDate
+}
+
+function weekIntersectsSemester(weekStart: string, semester: Semester) {
+  if (!semester.startDate || !semester.endDate) return true
+  const end = new Date(`${weekStart}T00:00:00`)
+  end.setDate(end.getDate() + 6)
+  return toYmd(end) >= semester.startDate && weekStart <= semester.endDate
+}
+
+function pickDefaultSemesterId(list: Semester[]) {
+  const today = toYmd(new Date())
+  return list.find((s) => semesterContainsDate(s, today))?.id ?? list[0]?.id ?? null
+}
+
+function alignWeekStartToSemester(semesterId: number | null) {
+  if (!semesterId) return
+  const semester = semesters.value.find((s) => s.id === semesterId)
+  if (!semester?.startDate) return
+  if (weekIntersectsSemester(weekStartDate.value, semester)) return
+  weekStartDate.value = getWeekStartYmd(new Date(`${semester.startDate}T00:00:00`))
+}
+
+async function ensureScheduleMeta() {
+  if (semesters.value.length > 0 && timeSlots.value.length > 0) return
+  semesters.value = await apiData<Semester[]>('/api/teacher/semesters', { method: 'GET' }, auth.token)
+  timeSlots.value = await apiData<TimeSlot[]>('/api/teacher/time-slots', { method: 'GET' }, auth.token)
+  scheduleSemesterId.value = pickDefaultSemesterId(semesters.value)
+  alignWeekStartToSemester(scheduleSemesterId.value)
 }
 
 const weekDays = computed(() => {
@@ -839,6 +1278,10 @@ function itemAt(slotId: number, date: string): WeekScheduleItem | null {
   return weekItems.value.find((x) => x.slotId === slotId && x.lessonDate === date) ?? null
 }
 
+const scheduleEmptyHint = computed(
+  () => !loadingWeek.value && !scheduleError.value && timeSlots.value.length > 0 && weekItems.value.length === 0,
+)
+
 async function loadWeek() {
   if (!scheduleSemesterId.value) {
     ElMessage.warning('请选择学期')
@@ -849,6 +1292,7 @@ async function loadWeek() {
     return
   }
   loadingWeek.value = true
+  scheduleError.value = ''
   try {
     weekItems.value = await apiData<WeekScheduleItem[]>(
       `/api/teacher/schedule/week?semesterId=${scheduleSemesterId.value}&weekStartDate=${encodeURIComponent(weekStartDate.value)}`,
@@ -856,11 +1300,20 @@ async function loadWeek() {
       auth.token,
     )
   } catch (e: any) {
-    ElMessage.error(e?.message ?? '加载课表失败')
+    weekItems.value = []
+    scheduleError.value = e?.message ?? '加载课表失败'
+    ElMessage.error(scheduleError.value)
   } finally {
     loadingWeek.value = false
   }
 }
+
+watch(
+  () => scheduleSemesterId.value,
+  (id) => {
+    alignWeekStartToSemester(id)
+  },
+)
 
 function prevWeek() {
   weekStartDate.value = addDays(weekStartDate.value, -7)
@@ -1126,7 +1579,7 @@ async function copyLink() {
       </div>
     </el-header>
     <el-container>
-      <el-aside v-if="activeTab === 'report' && !isMobile" width="360px" class="aside">
+      <el-aside v-if="(activeTab === 'report' || activeTab === 'flow') && !isMobile" width="360px" class="aside">
         <div class="aside-title">任务列表</div>
         <el-table
           :data="tasks"
@@ -1142,6 +1595,210 @@ async function copyLink() {
       </el-aside>
       <el-main class="main">
         <el-tabs v-model="activeTab" class="tabs">
+          <el-tab-pane label="实验过程管理" name="flow">
+            <el-card v-if="isMobile" class="block" shadow="never">
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                <el-select
+                  v-model="selectedTaskId"
+                  placeholder="选择任务"
+                  style="width: 260px"
+                  :loading="loadingTasks"
+                  @change="(id: any) => id && selectTask(Number(id))"
+                >
+                  <el-option v-for="t in tasks" :key="t.id" :label="t.title" :value="t.id" />
+                </el-select>
+                <el-button size="small" :loading="loadingTasks" @click="loadTasks">刷新任务</el-button>
+              </div>
+            </el-card>
+
+            <el-card v-if="taskDetail" class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+                    <div>{{ taskDetail.title }}</div>
+                    <el-tag v-if="taskDetail.status" :type="taskDetail.status === 'OPEN' ? 'success' : 'info'">
+                      {{ taskDetail.status }}
+                    </el-tag>
+                  </div>
+                  <div class="meta">截止：{{ taskDetail.deadlineAt || '-' }}</div>
+                </div>
+              </template>
+              <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="selectedTaskId">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>实验过程管理</div>
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap">
+                    <el-radio-group v-model="flowSubTab" size="small">
+                      <el-radio-button label="progress">过程监督</el-radio-button>
+                      <el-radio-button label="device">设备审批</el-radio-button>
+                    </el-radio-group>
+                  </div>
+                </div>
+              </template>
+
+              <template v-if="flowSubTab === 'progress'">
+                <div class="toolbar" style="margin-bottom: 12px">
+                  <el-input v-model="progressStudentQ" clearable placeholder="搜索学生姓名/账号" style="width: 280px" />
+                  <el-button type="primary" :loading="loadingProgressStudents" @click="loadProgressStudents">查询</el-button>
+                  <el-button :loading="loadingProgressStudents" @click="loadProgressStudents">刷新</el-button>
+                </div>
+
+                <template v-if="!isMobile">
+                  <el-table :data="progressStudents" v-loading="loadingProgressStudents" stripe>
+                    <el-table-column prop="studentDisplayName" label="学生姓名" min-width="140" />
+                    <el-table-column prop="studentUsername" label="用户名" width="140" />
+                    <el-table-column prop="classDisplayName" label="班级" min-width="150" />
+                    <el-table-column prop="progressCount" label="进度条数" width="100" />
+                    <el-table-column label="登记状态" width="120">
+                      <template #default="{ row }: { row: TeacherTaskProgressStudentVO }">
+                        <el-tag size="small" :type="completionStatusType(row.completionStatus)">{{ completionStatusText(row.completionStatus) }}</el-tag>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="最近更新时间" min-width="180">
+                      <template #default="{ row }: { row: TeacherTaskProgressStudentVO }">
+                        {{ row.latestUpdatedAt || '-' }}
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="220" fixed="right">
+                      <template #default="{ row }: { row: TeacherTaskProgressStudentVO }">
+                        <el-button size="small" @click="openProgressDetail(row)">查看过程</el-button>
+                        <el-button
+                          v-if="row.completionStatus === 'PENDING_CONFIRM'"
+                          size="small"
+                          type="primary"
+                          :loading="confirmingCompletion === row.studentId"
+                          @click="confirmCompletion(row)"
+                        >
+                          确认登记
+                        </el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="loadingProgressStudents" class="meta">加载中...</div>
+                  <div v-else-if="progressStudents.length === 0" class="meta">暂无学生过程记录</div>
+                  <el-card v-else v-for="row in progressStudents" :key="row.studentId" shadow="never" class="stuCard">
+                    <div class="stuHead">
+                      <div>
+                        <div class="stuName">{{ row.studentDisplayName }}</div>
+                        <div class="meta">{{ row.studentUsername }}</div>
+                      </div>
+                      <el-tag size="small" :type="completionStatusType(row.completionStatus)">{{ completionStatusText(row.completionStatus) }}</el-tag>
+                    </div>
+                    <div class="meta" style="margin-top: 8px">班级：{{ row.classDisplayName || '-' }}</div>
+                    <div class="meta">进度条数：{{ row.progressCount }}</div>
+                    <div class="meta">最近更新时间：{{ row.latestUpdatedAt || '-' }}</div>
+                    <div class="stuActions">
+                      <el-button size="small" @click="openProgressDetail(row)">查看过程</el-button>
+                      <el-button
+                        v-if="row.completionStatus === 'PENDING_CONFIRM'"
+                        size="small"
+                        type="primary"
+                        :loading="confirmingCompletion === row.studentId"
+                        @click="confirmCompletion(row)"
+                      >
+                        确认登记
+                      </el-button>
+                    </div>
+                  </el-card>
+                </template>
+              </template>
+
+              <template v-else>
+                <div class="toolbar" style="margin-bottom: 12px">
+                  <el-button type="primary" @click="openDeviceConfigDialog">任务设备配置</el-button>
+                  <el-button @click="exportDeviceRequests">借用历史导出</el-button>
+                  <el-input v-model="deviceRequestQ" clearable placeholder="搜索学生姓名/账号" style="width: 240px" />
+                  <el-select v-model="deviceRequestStatus" clearable placeholder="状态" style="width: 160px">
+                    <el-option label="PENDING" value="PENDING" />
+                    <el-option label="APPROVED" value="APPROVED" />
+                    <el-option label="REJECTED" value="REJECTED" />
+                    <el-option label="BORROWED" value="BORROWED" />
+                    <el-option label="RETURNED" value="RETURNED" />
+                  </el-select>
+                  <el-button type="primary" :loading="loadingDeviceRequests" @click="loadDeviceRequests">查询</el-button>
+                </div>
+
+                <el-card shadow="never" class="block">
+                  <template #header>
+                    <div>当前任务可借设备</div>
+                  </template>
+                  <div v-if="loadingTaskDevices" class="meta">加载中...</div>
+                  <div v-else-if="taskDevices.length === 0" class="meta">当前任务未配置设备</div>
+                  <div v-else class="deviceGrid">
+                    <div v-for="device in taskDevices" :key="device.deviceId" class="deviceBox">
+                      <div class="deviceTitle">{{ device.deviceName }}</div>
+                      <div class="meta">编码：{{ device.deviceCode }}</div>
+                      <div class="meta">任务上限：{{ device.configuredQuantity }}</div>
+                      <div class="meta">总库存：{{ device.totalQuantity }}</div>
+                      <div class="meta">已占用：{{ device.reservedQuantity }}</div>
+                      <div class="meta">当前可借：{{ device.availableQuantity }}</div>
+                      <div class="meta">状态：{{ device.deviceStatus }}</div>
+                    </div>
+                  </div>
+                </el-card>
+
+                <template v-if="!isMobile">
+                  <el-table :data="deviceRequests" v-loading="loadingDeviceRequests" stripe>
+                    <el-table-column prop="createdAt" label="申请时间" min-width="170" />
+                    <el-table-column prop="studentDisplayName" label="学生姓名" width="140" />
+                    <el-table-column prop="studentUsername" label="用户名" width="140" />
+                    <el-table-column prop="deviceName" label="设备名称" min-width="150" />
+                    <el-table-column prop="quantity" label="申请数量" width="100" />
+                    <el-table-column prop="status" label="状态" width="140" />
+                    <el-table-column label="备注/时间" min-width="220">
+                      <template #default="{ row }: { row: TaskDeviceRequestVO }">
+                        <div v-if="row.note" class="meta">说明：{{ row.note }}</div>
+                        <div v-if="row.approvedAt" class="meta">通过：{{ row.approvedAt }}</div>
+                        <div v-if="row.checkoutAt" class="meta">借出：{{ row.checkoutAt }}</div>
+                        <div v-if="row.returnAt" class="meta">归还：{{ row.returnAt }}</div>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="260" fixed="right">
+                      <template #default="{ row }: { row: TaskDeviceRequestVO }">
+                        <div class="tableActions">
+                          <el-button v-if="row.status === 'PENDING'" size="small" type="primary" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'approve', '审批通过')">通过</el-button>
+                          <el-button v-if="row.status === 'PENDING'" size="small" type="danger" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'reject', '已驳回')">驳回</el-button>
+                          <el-button v-if="row.status === 'APPROVED'" size="small" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'checkout', '已登记借出')">登记借出</el-button>
+                          <el-button v-if="row.status === 'BORROWED'" size="small" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'return', '已登记归还')">登记归还</el-button>
+                        </div>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="loadingDeviceRequests" class="meta">加载中...</div>
+                  <div v-else-if="deviceRequests.length === 0" class="meta">暂无设备申请记录</div>
+                  <el-card v-else v-for="row in deviceRequests" :key="row.id" shadow="never" class="stuCard">
+                    <div class="stuHead">
+                      <div>
+                        <div class="stuName">{{ row.studentDisplayName }}</div>
+                        <div class="meta">{{ row.studentUsername }}</div>
+                      </div>
+                      <el-tag size="small">{{ row.status }}</el-tag>
+                    </div>
+                    <div class="meta" style="margin-top: 8px">设备：{{ row.deviceName }} / 数量：{{ row.quantity }}</div>
+                    <div class="meta">申请时间：{{ row.createdAt }}</div>
+                    <div v-if="row.note" class="meta">说明：{{ row.note }}</div>
+                    <div v-if="row.approvedAt" class="meta">通过：{{ row.approvedAt }}</div>
+                    <div v-if="row.checkoutAt" class="meta">借出：{{ row.checkoutAt }}</div>
+                    <div v-if="row.returnAt" class="meta">归还：{{ row.returnAt }}</div>
+                    <div class="stuActions">
+                      <el-button v-if="row.status === 'PENDING'" size="small" type="primary" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'approve', '审批通过')">通过</el-button>
+                      <el-button v-if="row.status === 'PENDING'" size="small" type="danger" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'reject', '已驳回')">驳回</el-button>
+                      <el-button v-if="row.status === 'APPROVED'" size="small" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'checkout', '已登记借出')">登记借出</el-button>
+                      <el-button v-if="row.status === 'BORROWED'" size="small" :loading="actioningRequestId === row.id" @click="changeDeviceRequestStatus(row, 'return', '已登记归还')">登记归还</el-button>
+                    </div>
+                  </el-card>
+                </template>
+              </template>
+            </el-card>
+          </el-tab-pane>
+
           <el-tab-pane label="报告管理" name="report">
             <el-card v-if="isMobile" class="block" shadow="never">
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -1327,6 +1984,8 @@ async function copyLink() {
               <div class="meta" style="margin: 8px 0">
                 点击课表格子进入班级管理页，可开启/结束签到并查看实时名单。
               </div>
+              <div v-if="scheduleError" class="scheduleEmpty" style="margin: 8px 0">{{ scheduleError }}</div>
+              <div v-else-if="scheduleEmptyHint" class="scheduleEmpty" style="margin: 8px 0">当前周暂无课表，请切换周次或学期</div>
 
               <div class="grid" v-loading="loadingWeek">
                 <table class="week-table">
@@ -1605,6 +2264,88 @@ async function copyLink() {
     </el-form>
   </el-dialog>
 
+  <el-dialog v-model="progressDetailDialog" title="学生实验过程" width="980px" @closed="revokeProgressImageUrls">
+    <div v-if="progressDetail" v-loading="progressDetailLoading">
+      <div class="groupBar" style="margin-bottom: 12px">
+        <div>
+          <div class="stuName">{{ progressDetail.studentDisplayName }}</div>
+          <div class="meta">{{ progressDetail.studentUsername }} / {{ progressDetail.classDisplayName || '-' }}</div>
+          <div class="meta">
+            登记状态：
+            <el-tag size="small" :type="completionStatusType(progressDetail.completionStatus)">{{ completionStatusText(progressDetail.completionStatus) }}</el-tag>
+          </div>
+          <div v-if="progressDetail.requestedAt" class="meta">申请时间：{{ progressDetail.requestedAt }}</div>
+          <div v-if="progressDetail.confirmedAt" class="meta">确认时间：{{ progressDetail.confirmedAt }}</div>
+          <div v-if="progressDetail.confirmedByDisplayName" class="meta">确认教师：{{ progressDetail.confirmedByDisplayName }}</div>
+        </div>
+        <div>
+          <el-button
+            v-if="progressDetail.completionStatus === 'PENDING_CONFIRM'"
+            type="primary"
+            :loading="confirmingCompletion === progressDetail.studentId"
+            @click="confirmCompletion({
+              studentId: progressDetail.studentId,
+              studentUsername: progressDetail.studentUsername,
+              studentDisplayName: progressDetail.studentDisplayName,
+              classDisplayName: progressDetail.classDisplayName,
+              progressCount: progressDetail.logs.length,
+              completionStatus: progressDetail.completionStatus,
+              latestUpdatedAt: progressDetail.logs[progressDetail.logs.length - 1]?.createdAt,
+              requestedAt: progressDetail.requestedAt,
+              confirmedAt: progressDetail.confirmedAt,
+            })"
+          >
+            确认登记
+          </el-button>
+        </div>
+      </div>
+
+      <div v-if="progressDetail.logs.length === 0" class="meta">该学生还没有实验步骤记录</div>
+      <el-card v-else v-for="log in progressDetail.logs" :key="log.id" shadow="never" class="progressCard">
+        <template #header>
+          <div class="taskRow">
+            <div class="deviceTitle">步骤 {{ log.stepNo }}</div>
+            <div class="meta">{{ log.createdAt }}</div>
+          </div>
+        </template>
+        <div style="white-space: pre-wrap">{{ log.content || '（无文字说明）' }}</div>
+
+        <div v-if="log.attachments.length > 0" class="progressAtts" style="margin-top: 12px">
+          <div v-for="att in log.attachments" :key="att.id" class="progressAtt">
+            <template v-if="isImageLike(att.fileName, att.contentType) && progressImageUrls[att.id]">
+              <img :src="progressImageUrls[att.id]" :alt="att.fileName" class="progressThumb" />
+            </template>
+            <div class="attName" style="margin-top: 6px">{{ att.fileName }}</div>
+            <div class="meta">大小：{{ att.fileSize }} Byte</div>
+            <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+              <el-button size="small" @click="previewProgressAttachment(att)">预览</el-button>
+              <el-button size="small" @click="downloadProgressAttachment(att)">下载</el-button>
+            </div>
+          </div>
+        </div>
+      </el-card>
+    </div>
+  </el-dialog>
+
+  <el-dialog v-model="deviceConfigDialog" title="任务设备配置" width="920px">
+    <div class="meta" style="margin-bottom: 12px">从管理员设备台账选择本次实验允许申请的设备，并设置单次任务上限数量。设置为 0 表示该任务不可申请该设备。</div>
+    <el-table :data="deviceConfigDraft" stripe>
+      <el-table-column prop="deviceCode" label="编码" width="140" />
+      <el-table-column prop="deviceName" label="设备名称" min-width="160" />
+      <el-table-column prop="deviceStatus" label="台账状态" width="120" />
+      <el-table-column prop="totalQuantity" label="总库存" width="100" />
+      <el-table-column label="任务上限数量" width="180">
+        <template #default="{ row }">
+          <el-input-number v-model="row.maxQuantity" :min="0" :max="row.totalQuantity || 999" />
+        </template>
+      </el-table-column>
+    </el-table>
+    <template #footer>
+      <el-button @click="deviceConfigDialog = false">取消</el-button>
+      <el-button type="primary" :loading="savingTaskDevices" @click="saveTaskDevices">保存配置</el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="previewDialog" :title="previewTitle || '附件预览'" width="900px" @closed="closePreview">
     <div v-if="previewKind === 'image'">
       <div v-if="!previewUrl">加载中...</div>
@@ -1876,6 +2617,12 @@ async function copyLink() {
 .subCard {
   margin-bottom: 10px;
 }
+.taskRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
 .historyCard {
   margin-bottom: 10px;
 }
@@ -1936,6 +2683,47 @@ async function copyLink() {
 .attName {
   font-weight: 700;
   word-break: break-word;
+}
+.tableActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.deviceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.deviceBox {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fafcff;
+}
+.deviceTitle {
+  font-weight: 700;
+}
+.progressCard {
+  margin-bottom: 10px;
+}
+.progressAtts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.progressAtt {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fafcff;
+}
+.progressThumb {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
 }
 .qr {
   width: 240px;

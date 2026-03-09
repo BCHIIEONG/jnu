@@ -18,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/teacher/attendance")
-@PreAuthorize("hasRole('TEACHER')")
+@PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
 public class TeacherAttendanceController {
 
     private final AttendanceService attendanceService;

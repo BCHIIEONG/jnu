@@ -88,6 +88,38 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
     );
 
     @Select("""
+            SELECT cs.id,
+                   cs.semester_id,
+                   cs.class_id,
+                   CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,
+                   cs.teacher_id,
+                   t.display_name AS teacher_display_name,
+                   cs.lab_room_id,
+                   r.name AS lab_room_name,
+                   cs.lesson_date,
+                   cs.slot_id,
+                   ts.code AS slot_code,
+                   ts.name AS slot_name,
+                   ts.start_time AS slot_start_time,
+                   ts.end_time AS slot_end_time,
+                   cs.course_name
+            FROM course_schedule cs
+            JOIN org_class c ON c.id = cs.class_id
+            JOIN sys_user t ON t.id = cs.teacher_id
+            LEFT JOIN lab_room r ON r.id = cs.lab_room_id
+            JOIN time_slot ts ON ts.id = cs.slot_id
+            WHERE cs.semester_id = #{semesterId}
+              AND cs.lesson_date >= #{from}
+              AND cs.lesson_date <= #{to}
+            ORDER BY cs.lesson_date ASC, ts.start_time ASC, cs.id ASC
+            """)
+    List<TeacherWeekScheduleItemVO> findWeekAnyTeacher(
+            @Param("semesterId") Long semesterId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to
+    );
+
+    @Select("""
             SELECT DISTINCT c.id,
                             CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS name,
                             d.name AS department_name

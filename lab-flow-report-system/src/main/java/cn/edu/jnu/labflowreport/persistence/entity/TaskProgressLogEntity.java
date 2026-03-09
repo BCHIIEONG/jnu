@@ -7,17 +7,14 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("device")
-public class DeviceEntity {
+@TableName("task_progress_log")
+public class TaskProgressLogEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String code;
-    private String name;
-    private String status;
-    private Integer totalQuantity;
-    private String location;
-    private String description;
+    private Long taskId;
+    private Long studentId;
+    private Integer stepNo;
+    private String content;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

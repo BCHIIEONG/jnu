@@ -8,6 +8,7 @@ type Device = {
   id: number
   code: string
   name: string
+  totalQuantity: number
   status: string
   location?: string | null
   description?: string | null
@@ -24,7 +25,7 @@ const filter = reactive({ q: '', status: '' })
 
 const dialog = ref(false)
 const editing = ref<Device | null>(null)
-const form = reactive({ code: '', name: '', status: 'AVAILABLE', location: '', description: '' })
+const form = reactive({ code: '', name: '', totalQuantity: 1, status: 'AVAILABLE', location: '', description: '' })
 
 function buildQuery() {
   const p = new URLSearchParams()
@@ -48,6 +49,7 @@ function openCreate() {
   editing.value = null
   form.code = ''
   form.name = ''
+  form.totalQuantity = 1
   form.status = 'AVAILABLE'
   form.location = ''
   form.description = ''
@@ -58,6 +60,7 @@ function openEdit(d: Device) {
   editing.value = d
   form.code = d.code
   form.name = d.name
+  form.totalQuantity = d.totalQuantity ?? 1
   form.status = d.status
   form.location = d.location ?? ''
   form.description = d.description ?? ''
@@ -70,9 +73,14 @@ async function submit() {
       ElMessage.warning('code/name 不能为空')
       return
     }
+    if (!form.totalQuantity || form.totalQuantity < 1) {
+      ElMessage.warning('总库存至少为 1')
+      return
+    }
     const body = {
       code: form.code,
       name: form.name,
+      totalQuantity: form.totalQuantity,
       status: form.status || null,
       location: form.location || null,
       description: form.description || null,
@@ -135,6 +143,7 @@ onMounted(load)
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="code" label="编码" width="150" />
       <el-table-column prop="name" label="名称" width="200" />
+      <el-table-column prop="totalQuantity" label="总库存" width="100" />
       <el-table-column prop="status" label="状态" width="120" />
       <el-table-column prop="location" label="位置" />
       <el-table-column prop="description" label="描述" width="220" />
@@ -153,6 +162,9 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="name">
           <el-input v-model="form.name" placeholder="示波器" />
+        </el-form-item>
+        <el-form-item label="总库存">
+          <el-input-number v-model="form.totalQuantity" :min="1" style="width: 100%" />
         </el-form-item>
         <el-form-item label="status">
           <el-select v-model="form.status" style="width: 100%">
@@ -190,4 +202,3 @@ onMounted(load)
   align-items: center;
 }
 </style>
-

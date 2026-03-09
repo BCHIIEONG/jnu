@@ -21,10 +21,41 @@ public interface SysUserMapper extends BaseMapper<SysUserEntity> {
     List<String> findRoleCodesByUserId(Long userId);
 
     @Select("""
-            SELECT id, username, display_name, class_id
-            FROM sys_user
-            WHERE class_id = #{classId} AND enabled = TRUE
-            ORDER BY username ASC
+            SELECT DISTINCT su.id, su.username, su.display_name, su.class_id
+            FROM sys_user su
+            JOIN sys_user_role ur ON ur.user_id = su.id
+            JOIN sys_role r ON r.id = ur.role_id
+            WHERE su.class_id = #{classId}
+              AND su.enabled = TRUE
+              AND r.code = 'ROLE_STUDENT'
+            ORDER BY su.username ASC
             """)
     List<SysUserEntity> findStudentsByClassId(Long classId);
+
+    @Select("""
+            SELECT DISTINCT su.id, su.username, su.display_name, su.enabled, su.department_id, su.class_id, su.created_at, su.updated_at
+            FROM sys_user su
+            JOIN sys_user_role ur ON ur.user_id = su.id
+            JOIN sys_role r ON r.id = ur.role_id
+            WHERE su.enabled = TRUE
+              AND r.code = 'ROLE_STUDENT'
+              AND (
+                    NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
+                    OR su.class_id IN (SELECT tc.class_id FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
+              )
+            ORDER BY su.username ASC
+            """)
+    List<SysUserEntity> findStudentsForTask(Long taskId);
+
+    @Select("""
+            SELECT DISTINCT su.id, su.username, su.password_hash, su.display_name, su.enabled, su.department_id, su.class_id, su.created_at, su.updated_at
+            FROM sys_user su
+            JOIN sys_user_role ur ON ur.user_id = su.id
+            JOIN sys_role r ON r.id = ur.role_id
+            WHERE su.enabled = TRUE
+              AND r.code = 'ROLE_TEACHER'
+            ORDER BY CASE WHEN su.username = 'teacher' THEN 0 ELSE 1 END, su.id ASC
+            LIMIT 1
+            """)
+    SysUserEntity findPrimaryTeacher();
 }

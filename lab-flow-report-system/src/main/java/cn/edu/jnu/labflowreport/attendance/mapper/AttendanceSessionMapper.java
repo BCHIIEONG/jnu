@@ -69,12 +69,17 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                 GROUP BY session_id
             ) rec ON rec.session_id = s.id
             LEFT JOIN (
-                SELECT class_id, COUNT(*) AS total_count
-                FROM sys_user
-                WHERE enabled = TRUE AND class_id IS NOT NULL
-                GROUP BY class_id
+                SELECT su.class_id, COUNT(*) AS total_count
+                FROM sys_user su
+                JOIN sys_user_role ur ON ur.user_id = su.id
+                JOIN sys_role sr ON sr.id = ur.role_id
+                WHERE su.enabled = TRUE
+                  AND su.class_id IS NOT NULL
+                  AND sr.code = 'ROLE_STUDENT'
+                GROUP BY su.class_id
             ) roster ON roster.class_id = s.class_id
-            WHERE s.teacher_id = #{teacherId}
+            WHERE 1 = 1
+            <if test="teacherId != null"> AND s.teacher_id = #{teacherId}</if>
             <if test="grade != null">
               AND (
                 c.grade = #{grade}
@@ -111,7 +116,8 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
             LEFT JOIN course_schedule cs ON cs.id = s.schedule_id
             LEFT JOIN org_class c ON c.id = s.class_id
             LEFT JOIN lab_room r ON r.id = cs.lab_room_id
-            WHERE s.teacher_id = #{teacherId}
+            WHERE 1 = 1
+            <if test="teacherId != null"> AND s.teacher_id = #{teacherId}</if>
             <if test="grade != null">
               AND (
                 c.grade = #{grade}
@@ -162,10 +168,14 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                 GROUP BY session_id
             ) rec ON rec.session_id = s.id
             LEFT JOIN (
-                SELECT class_id, COUNT(*) AS total_count
-                FROM sys_user
-                WHERE enabled = TRUE AND class_id IS NOT NULL
-                GROUP BY class_id
+                SELECT su.class_id, COUNT(*) AS total_count
+                FROM sys_user su
+                JOIN sys_user_role ur ON ur.user_id = su.id
+                JOIN sys_role sr ON sr.id = ur.role_id
+                WHERE su.enabled = TRUE
+                  AND su.class_id IS NOT NULL
+                  AND sr.code = 'ROLE_STUDENT'
+                GROUP BY su.class_id
             ) roster ON roster.class_id = s.class_id
             WHERE s.id = #{sessionId}
             LIMIT 1

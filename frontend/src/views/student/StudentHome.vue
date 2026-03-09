@@ -34,6 +34,64 @@ type AttachmentVO = {
   uploadedAt: string
 }
 
+type ProgressAttachmentVO = {
+  id: number
+  progressLogId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedAt: string
+}
+
+type TaskProgressVO = {
+  id: number
+  taskId: number
+  studentId: number
+  stepNo: number
+  content?: string | null
+  createdAt: string
+  attachments: ProgressAttachmentVO[]
+}
+
+type TaskCompletionVO = {
+  taskId: number
+  studentId: number
+  status: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  requestedAt?: string | null
+  confirmedAt?: string | null
+  confirmedBy?: number | null
+  confirmedByDisplayName?: string | null
+}
+
+type TaskDeviceConfigVO = {
+  deviceId: number
+  deviceCode: string
+  deviceName: string
+  deviceStatus: string
+  totalQuantity: number
+  configuredQuantity: number
+  reservedQuantity: number
+  availableQuantity: number
+}
+
+type TaskDeviceRequestVO = {
+  id: number
+  taskId: number
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  deviceId: number
+  deviceCode: string
+  deviceName: string
+  quantity: number
+  status: string
+  note?: string | null
+  createdAt: string
+  approvedAt?: string | null
+  checkoutAt?: string | null
+  returnAt?: string | null
+}
+
 type ReviewVO = {
   id: number
   submissionId: number
@@ -99,12 +157,36 @@ const uploading = ref(false)
 const uploadFile = ref<File | null>(null)
 
 const latestSubmission = computed(() => (mySubmissions.value.length > 0 ? mySubmissions.value[0]! : null))
+const nextProgressStepNo = computed(() => {
+  const max = progressLogs.value.reduce((m, item) => Math.max(m, item.stepNo || 0), 0)
+  return max + 1
+})
 
 const previewDialog = ref(false)
 const previewUrl = ref<string | null>(null)
 const previewKind = ref<'image' | 'text'>('image')
 const previewText = ref<string>('')
 const previewTitle = ref('')
+const progressLogs = ref<TaskProgressVO[]>([])
+const loadingProgress = ref(false)
+const progressContent = ref('')
+const progressSubmitting = ref(false)
+const progressFiles = ref<File[]>([])
+const progressFileInput = ref<HTMLInputElement | null>(null)
+const progressImageUrls = ref<Record<number, string>>({})
+const completionInfo = ref<TaskCompletionVO | null>(null)
+const completionLoading = ref(false)
+const completionSubmitting = ref(false)
+const taskDevices = ref<TaskDeviceConfigVO[]>([])
+const loadingTaskDevices = ref(false)
+const deviceRequests = ref<TaskDeviceRequestVO[]>([])
+const loadingDeviceRequests = ref(false)
+const deviceSubmitting = ref(false)
+const deviceForm = ref({
+  deviceId: undefined as number | undefined,
+  quantity: 1,
+  note: '',
+})
 
 const semesters = ref<Semester[]>([])
 const timeSlots = ref<TimeSlot[]>([])
@@ -127,6 +209,31 @@ function getWeekStartYmd(date: Date): string {
   const diff = day === 0 ? -6 : 1 - day
   copy.setDate(copy.getDate() + diff)
   return toYmd(copy)
+}
+
+function semesterContainsDate(semester: Semester, ymd: string) {
+  if (!semester.startDate || !semester.endDate) return false
+  return semester.startDate <= ymd && ymd <= semester.endDate
+}
+
+function weekIntersectsSemester(weekStart: string, semester: Semester) {
+  if (!semester.startDate || !semester.endDate) return true
+  const end = new Date(`${weekStart}T00:00:00`)
+  end.setDate(end.getDate() + 6)
+  return toYmd(end) >= semester.startDate && weekStart <= semester.endDate
+}
+
+function pickDefaultSemesterId(list: Semester[]) {
+  const today = toYmd(new Date())
+  return list.find((s) => semesterContainsDate(s, today))?.id ?? list[0]?.id ?? null
+}
+
+function alignWeekStartToSemester(semesterId: number | null) {
+  if (!semesterId) return
+  const semester = semesters.value.find((s) => s.id === semesterId)
+  if (!semester?.startDate) return
+  if (weekIntersectsSemester(weekStartDate.value, semester)) return
+  weekStartDate.value = getWeekStartYmd(new Date(`${semester.startDate}T00:00:00`))
 }
 
 function formatWeekdayLabel(date: string): string {
@@ -158,6 +265,22 @@ const mobileScheduleDays = computed(() =>
   })),
 )
 
+const scheduleEmptyHint = computed(
+  () => !loadingWeek.value && !scheduleError.value && timeSlots.value.length > 0 && weekItems.value.length === 0,
+)
+
+function completionStatusText(status?: TaskCompletionVO['status']) {
+  if (status === 'PENDING_CONFIRM') return '待教师确认'
+  if (status === 'CONFIRMED') return '已确认'
+  return '未登记'
+}
+
+function completionStatusType(status?: TaskCompletionVO['status']) {
+  if (status === 'PENDING_CONFIRM') return 'warning'
+  if (status === 'CONFIRMED') return 'success'
+  return 'info'
+}
+
 async function loadTasks() {
   loadingTasks.value = true
   try {
@@ -179,9 +302,8 @@ async function loadScheduleMeta() {
     ])
     semesters.value = semesterList
     timeSlots.value = slotList
-    if (!scheduleSemesterId.value && semesterList.length > 0) {
-      scheduleSemesterId.value = semesterList[0]!.id
-    }
+    scheduleSemesterId.value = pickDefaultSemesterId(semesterList)
+    alignWeekStartToSemester(scheduleSemesterId.value)
   } catch (e: any) {
     ElMessage.error(e?.message ?? '加载课表元数据失败')
   }
@@ -225,7 +347,7 @@ function nextWeek() {
 async function selectTask(taskId: number) {
   selectedTaskId.value = taskId
   taskDetail.value = await apiData<TaskVO>(`/api/tasks/${taskId}`, { method: 'GET' }, auth.token)
-  await loadMySubmissions()
+  await Promise.all([loadMySubmissions(), loadFlowData()])
 }
 
 async function openTaskMobile(taskId: number) {
@@ -242,10 +364,15 @@ async function openScheduleMobile() {
 }
 
 function backToListMobile() {
+  revokeProgressImageUrls()
   mobilePage.value = 'list'
   selectedTaskId.value = null
   taskDetail.value = null
   mySubmissions.value = []
+  progressLogs.value = []
+  completionInfo.value = null
+  taskDevices.value = []
+  deviceRequests.value = []
 }
 
 async function loadMySubmissions() {
@@ -259,6 +386,177 @@ async function loadMySubmissions() {
     )
   } finally {
     loadingSubs.value = false
+  }
+}
+
+function isImageLike(name?: string | null, contentType?: string | null) {
+  const ct = (contentType ?? '').toLowerCase()
+  const n = (name ?? '').toLowerCase()
+  return ct.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(n)
+}
+
+function revokeProgressImageUrls() {
+  for (const v of Object.values(progressImageUrls.value)) {
+    if (v) URL.revokeObjectURL(v)
+  }
+  progressImageUrls.value = {}
+}
+
+async function ensureProgressImageUrls(logs: TaskProgressVO[]) {
+  revokeProgressImageUrls()
+  for (const log of logs) {
+    for (const att of log.attachments || []) {
+      if (!isImageLike(att.fileName, att.contentType)) continue
+      try {
+        const { blob } = await fetchBlob(`/api/progress-attachments/${att.id}/download`, { token: auth.token })
+        progressImageUrls.value[att.id] = URL.createObjectURL(blob)
+      } catch {
+        // ignore broken preview and keep download available
+      }
+    }
+  }
+}
+
+async function loadProgressLogs() {
+  if (!selectedTaskId.value) return
+  loadingProgress.value = true
+  try {
+    progressLogs.value = await apiData<TaskProgressVO[]>(`/api/tasks/${selectedTaskId.value}/progress/me`, { method: 'GET' }, auth.token)
+    await ensureProgressImageUrls(progressLogs.value)
+  } catch (e: any) {
+    progressLogs.value = []
+    revokeProgressImageUrls()
+    ElMessage.error(e?.message ?? '加载实验步骤失败')
+  } finally {
+    loadingProgress.value = false
+  }
+}
+
+async function loadCompletionInfo() {
+  if (!selectedTaskId.value) return
+  completionLoading.value = true
+  try {
+    completionInfo.value = await apiData<TaskCompletionVO>(`/api/tasks/${selectedTaskId.value}/completion/me`, { method: 'GET' }, auth.token)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加载登记状态失败')
+  } finally {
+    completionLoading.value = false
+  }
+}
+
+async function loadTaskDevices() {
+  if (!selectedTaskId.value) return
+  loadingTaskDevices.value = true
+  try {
+    taskDevices.value = await apiData<TaskDeviceConfigVO[]>(`/api/tasks/${selectedTaskId.value}/devices`, { method: 'GET' }, auth.token)
+    if (!taskDevices.value.find((d) => d.deviceId === deviceForm.value.deviceId)) {
+      const first = taskDevices.value.find((d) => d.availableQuantity > 0)
+      deviceForm.value.deviceId = first?.deviceId
+      deviceForm.value.quantity = 1
+    }
+  } catch (e: any) {
+    taskDevices.value = []
+    ElMessage.error(e?.message ?? '加载设备列表失败')
+  } finally {
+    loadingTaskDevices.value = false
+  }
+}
+
+async function loadDeviceRequests() {
+  if (!selectedTaskId.value) return
+  loadingDeviceRequests.value = true
+  try {
+    deviceRequests.value = await apiData<TaskDeviceRequestVO[]>(`/api/tasks/${selectedTaskId.value}/device-requests/me`, { method: 'GET' }, auth.token)
+  } catch (e: any) {
+    deviceRequests.value = []
+    ElMessage.error(e?.message ?? '加载设备申请记录失败')
+  } finally {
+    loadingDeviceRequests.value = false
+  }
+}
+
+async function loadFlowData() {
+  await Promise.all([loadProgressLogs(), loadCompletionInfo(), loadTaskDevices(), loadDeviceRequests()])
+}
+
+function onPickProgressFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  progressFiles.value = Array.from(input.files ?? [])
+  progressFileInput.value = input
+}
+
+async function submitProgress() {
+  if (!selectedTaskId.value) return
+  if (!progressContent.value.trim() && progressFiles.value.length === 0) {
+    ElMessage.warning('请填写步骤说明或上传附件')
+    return
+  }
+  progressSubmitting.value = true
+  try {
+    const fd = new FormData()
+    fd.append('content', progressContent.value ?? '')
+    for (const f of progressFiles.value) fd.append('files', f)
+    await uploadFormData(`/api/tasks/${selectedTaskId.value}/progress`, { token: auth.token, formData: fd })
+    ElMessage.success('步骤记录成功')
+    progressContent.value = ''
+    progressFiles.value = []
+    if (progressFileInput.value) progressFileInput.value.value = ''
+    await loadProgressLogs()
+    await loadCompletionInfo()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '步骤提交失败')
+  } finally {
+    progressSubmitting.value = false
+  }
+}
+
+async function submitCompletionRequest() {
+  if (!selectedTaskId.value) return
+  completionSubmitting.value = true
+  try {
+    await apiData(`/api/tasks/${selectedTaskId.value}/completion`, { method: 'POST' }, auth.token)
+    ElMessage.success('已提交完成登记，等待教师确认')
+    await loadCompletionInfo()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '提交登记失败')
+  } finally {
+    completionSubmitting.value = false
+  }
+}
+
+async function submitDeviceRequest() {
+  if (!selectedTaskId.value) return
+  if (!deviceForm.value.deviceId) {
+    ElMessage.warning('请选择设备')
+    return
+  }
+  if (!deviceForm.value.quantity || deviceForm.value.quantity < 1) {
+    ElMessage.warning('数量至少为 1')
+    return
+  }
+  deviceSubmitting.value = true
+  try {
+    await apiData(
+      `/api/tasks/${selectedTaskId.value}/device-requests`,
+      {
+        method: 'POST',
+        body: {
+          deviceId: deviceForm.value.deviceId,
+          quantity: deviceForm.value.quantity,
+          note: deviceForm.value.note || null,
+        },
+      },
+      auth.token,
+    )
+    ElMessage.success('设备申请已提交')
+    deviceForm.value.quantity = 1
+    deviceForm.value.note = ''
+    await loadTaskDevices()
+    await loadDeviceRequests()
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '设备申请失败')
+  } finally {
+    deviceSubmitting.value = false
   }
 }
 
@@ -481,6 +779,58 @@ async function previewAttachment(row: AttachmentVO) {
   }
 }
 
+async function downloadProgressAttachment(row: ProgressAttachmentVO) {
+  try {
+    await downloadBlob(`/api/progress-attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `progress-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+async function previewProgressAttachment(row: ProgressAttachmentVO) {
+  try {
+    closePreview()
+    const { blob, contentType } = await fetchBlob(`/api/progress-attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
+  }
+}
+
 function logout() {
   auth.logout()
   router.replace('/login')
@@ -493,7 +843,15 @@ watch(
     if (!semesters.value.length || !timeSlots.value.length) {
       await loadScheduleMeta()
     }
+    alignWeekStartToSemester(scheduleSemesterId.value)
     await loadWeek()
+  },
+)
+
+watch(
+  () => scheduleSemesterId.value,
+  (id) => {
+    alignWeekStartToSemester(id)
   },
 )
 
@@ -555,6 +913,140 @@ onMounted(async () => {
         </el-card>
 
           <el-collapse accordion class="block">
+            <el-collapse-item :title="`实验步骤（下一步：${nextProgressStepNo}）`" name="progress">
+              <el-card shadow="never" class="innerCard">
+                <template #header>
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px">
+                    <div>步骤 {{ nextProgressStepNo }}</div>
+                    <el-button type="primary" size="small" :loading="progressSubmitting" @click="submitProgress">提交步骤</el-button>
+                  </div>
+                </template>
+                <el-input
+                  v-model="progressContent"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="记录本步骤的实验内容、现象、问题或处理过程"
+                />
+                <div style="margin-top: 10px">
+                  <div class="meta" style="margin-bottom: 6px">步骤附件（可选，图片会直接显示）</div>
+                  <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                    <input type="file" multiple @change="onPickProgressFiles" />
+                    <div class="meta" v-if="progressFiles.length > 0">已选择 {{ progressFiles.length }} 个文件</div>
+                  </div>
+                </div>
+              </el-card>
+
+              <div style="margin-top: 12px">
+                <div v-if="loadingProgress" class="meta">加载中...</div>
+                <div v-else-if="progressLogs.length === 0" class="meta">还没有实验步骤记录</div>
+                <el-card v-else v-for="log in progressLogs" :key="log.id" shadow="never" class="progressCard">
+                  <template #header>
+                    <div class="taskRow">
+                      <div class="progressTitle">步骤 {{ log.stepNo }}</div>
+                      <div class="meta">{{ log.createdAt }}</div>
+                    </div>
+                  </template>
+                  <div style="white-space: pre-wrap">{{ log.content || '（无文字说明）' }}</div>
+
+                  <div v-if="log.attachments.length > 0" class="progressAtts">
+                    <div v-for="att in log.attachments" :key="att.id" class="progressAtt">
+                      <template v-if="isImageLike(att.fileName, att.contentType) && progressImageUrls[att.id]">
+                        <img :src="progressImageUrls[att.id]" :alt="att.fileName" class="progressThumb" />
+                      </template>
+                      <div class="attName" style="margin-top: 6px">{{ att.fileName }}</div>
+                      <div class="meta">大小：{{ att.fileSize }} Byte</div>
+                      <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                        <el-button size="small" @click="previewProgressAttachment(att)">预览</el-button>
+                        <el-button size="small" @click="downloadProgressAttachment(att)">下载</el-button>
+                      </div>
+                    </div>
+                  </div>
+                </el-card>
+              </div>
+            </el-collapse-item>
+
+            <el-collapse-item title="完成登记" name="completion">
+              <div class="taskRow" style="margin-bottom: 10px">
+                <div class="meta">完成状态</div>
+                <el-tag :type="completionStatusType(completionInfo?.status)">{{ completionStatusText(completionInfo?.status) }}</el-tag>
+              </div>
+              <div v-if="completionInfo?.requestedAt" class="meta">申请时间：{{ completionInfo.requestedAt }}</div>
+              <div v-if="completionInfo?.confirmedAt" class="meta">确认时间：{{ completionInfo.confirmedAt }}</div>
+              <div v-if="completionInfo?.confirmedByDisplayName" class="meta">确认教师：{{ completionInfo.confirmedByDisplayName }}</div>
+              <div style="margin-top: 12px">
+                <el-button
+                  type="primary"
+                  :loading="completionSubmitting || completionLoading"
+                  :disabled="completionInfo?.status !== 'NONE'"
+                  @click="submitCompletionRequest"
+                >
+                  完成全部步骤并提交登记
+                </el-button>
+              </div>
+            </el-collapse-item>
+
+            <el-collapse-item title="设备申请" name="device">
+              <el-card shadow="never" class="innerCard">
+                <template #header>
+                  <div>可申请设备</div>
+                </template>
+                <div v-if="loadingTaskDevices" class="meta">加载中...</div>
+                <div v-else-if="taskDevices.length === 0" class="meta">当前任务未配置可借设备</div>
+                <div v-else class="deviceGrid">
+                  <div v-for="device in taskDevices" :key="device.deviceId" class="deviceBox">
+                    <div class="progressTitle">{{ device.deviceName }}</div>
+                    <div class="meta">编码：{{ device.deviceCode }}</div>
+                    <div class="meta">任务上限：{{ device.configuredQuantity }}</div>
+                    <div class="meta">总库存：{{ device.totalQuantity }}</div>
+                    <div class="meta">已占用：{{ device.reservedQuantity }}</div>
+                    <div class="meta">当前可申请：{{ device.availableQuantity }}</div>
+                  </div>
+                </div>
+              </el-card>
+
+              <el-card v-if="taskDevices.length > 0" shadow="never" class="innerCard" style="margin-top: 12px">
+                <template #header>
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px">
+                    <div>发起设备申请</div>
+                    <el-button type="primary" size="small" :loading="deviceSubmitting" @click="submitDeviceRequest">提交申请</el-button>
+                  </div>
+                </template>
+                <div class="deviceForm">
+                  <el-select v-model="deviceForm.deviceId" placeholder="选择设备">
+                    <el-option
+                      v-for="device in taskDevices"
+                      :key="device.deviceId"
+                      :label="`${device.deviceName}（可申请 ${device.availableQuantity}）`"
+                      :value="device.deviceId"
+                    />
+                  </el-select>
+                  <el-input-number v-model="deviceForm.quantity" :min="1" :max="999" />
+                  <el-input v-model="deviceForm.note" type="textarea" :rows="3" placeholder="申请说明（可选）" />
+                </div>
+              </el-card>
+
+              <div style="margin-top: 12px">
+                <div class="taskRow" style="margin-bottom: 10px">
+                  <div>我的申请记录</div>
+                  <el-button size="small" :loading="loadingDeviceRequests" @click="loadDeviceRequests">刷新</el-button>
+                </div>
+                <div v-if="loadingDeviceRequests" class="meta">加载中...</div>
+                <div v-else-if="deviceRequests.length === 0" class="meta">暂无设备申请记录</div>
+                <el-card v-else v-for="row in deviceRequests" :key="row.id" shadow="never" class="subCard">
+                  <div class="taskRow">
+                    <div class="progressTitle">{{ row.deviceName }}</div>
+                    <el-tag size="small">{{ row.status }}</el-tag>
+                  </div>
+                  <div class="meta">数量：{{ row.quantity }}</div>
+                  <div class="meta">申请时间：{{ row.createdAt }}</div>
+                  <div v-if="row.note" class="meta">说明：{{ row.note }}</div>
+                  <div v-if="row.approvedAt" class="meta">通过时间：{{ row.approvedAt }}</div>
+                  <div v-if="row.checkoutAt" class="meta">借出时间：{{ row.checkoutAt }}</div>
+                  <div v-if="row.returnAt" class="meta">归还时间：{{ row.returnAt }}</div>
+                </el-card>
+              </div>
+            </el-collapse-item>
+
             <el-collapse-item title="提交报告" name="submit">
               <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
                 <el-button type="primary" size="small" :loading="submitting" @click="submit">提交</el-button>
@@ -569,25 +1061,25 @@ onMounted(async () => {
               </div>
             </el-collapse-item>
 
-          <el-collapse-item title="我的提交" name="subs">
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
-              <el-button size="small" @click="loadMySubmissions" :loading="loadingSubs">刷新</el-button>
-            </div>
-            <el-card v-for="s in mySubmissions" :key="s.id" shadow="never" class="subCard">
-              <div class="taskRow">
-                <div>v{{ s.versionNo }}</div>
-                <div class="meta">{{ s.submittedAt }}</div>
+            <el-collapse-item title="我的提交" name="subs">
+              <div style="display: flex; justify-content: flex-end; margin-bottom: 10px">
+                <el-button size="small" @click="loadMySubmissions" :loading="loadingSubs">刷新</el-button>
               </div>
-              <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap">
-                <el-button size="small" @click="viewReview(s.id)">查看批阅</el-button>
-                <el-button size="small" @click="openContent(s)">查看内容</el-button>
-                <el-button size="small" @click="openAttachments(s)">附件</el-button>
-              </div>
-            </el-card>
-            <div v-if="loadingSubs" class="meta">加载中...</div>
-            <div v-else-if="mySubmissions.length === 0" class="meta">暂无提交</div>
-          </el-collapse-item>
-        </el-collapse>
+              <el-card v-for="s in mySubmissions" :key="s.id" shadow="never" class="subCard">
+                <div class="taskRow">
+                  <div>v{{ s.versionNo }}</div>
+                  <div class="meta">{{ s.submittedAt }}</div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap">
+                  <el-button size="small" @click="viewReview(s.id)">查看批阅</el-button>
+                  <el-button size="small" @click="openContent(s)">查看内容</el-button>
+                  <el-button size="small" @click="openAttachments(s)">附件</el-button>
+                </div>
+              </el-card>
+              <div v-if="loadingSubs" class="meta">加载中...</div>
+              <div v-else-if="mySubmissions.length === 0" class="meta">暂无提交</div>
+            </el-collapse-item>
+          </el-collapse>
       </div>
 
       <div v-else>
@@ -611,6 +1103,7 @@ onMounted(async () => {
         </el-card>
 
         <div v-if="scheduleError" class="scheduleEmpty">{{ scheduleError }}</div>
+        <div v-else-if="scheduleEmptyHint" class="scheduleEmpty">当前周暂无课表，请切换周次或学期</div>
 
         <el-card v-for="day in mobileScheduleDays" :key="day.date" shadow="never" class="block">
           <template #header>
@@ -668,6 +1161,145 @@ onMounted(async () => {
             <el-card class="block" shadow="never" v-if="selectedTaskId">
               <template #header>
                 <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>实验步骤</div>
+                  <el-tag type="info">下一步：步骤 {{ nextProgressStepNo }}</el-tag>
+                </div>
+              </template>
+              <div class="progressComposer">
+                <el-input
+                  v-model="progressContent"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="记录本步骤的实验内容、现象、问题或处理过程"
+                />
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                  <input type="file" multiple @change="onPickProgressFiles" />
+                  <div class="meta" v-if="progressFiles.length > 0">已选择 {{ progressFiles.length }} 个文件</div>
+                  <el-button type="primary" size="small" :loading="progressSubmitting" @click="submitProgress">提交步骤</el-button>
+                </div>
+              </div>
+
+              <div style="margin-top: 12px">
+                <div v-if="loadingProgress" class="meta">加载中...</div>
+                <div v-else-if="progressLogs.length === 0" class="meta">还没有实验步骤记录</div>
+                <el-card v-else v-for="log in progressLogs" :key="log.id" shadow="never" class="progressCard">
+                  <template #header>
+                    <div class="taskRow">
+                      <div class="progressTitle">步骤 {{ log.stepNo }}</div>
+                      <div class="meta">{{ log.createdAt }}</div>
+                    </div>
+                  </template>
+                  <div style="white-space: pre-wrap">{{ log.content || '（无文字说明）' }}</div>
+                  <div v-if="log.attachments.length > 0" class="progressAtts">
+                    <div v-for="att in log.attachments" :key="att.id" class="progressAtt">
+                      <template v-if="isImageLike(att.fileName, att.contentType) && progressImageUrls[att.id]">
+                        <img :src="progressImageUrls[att.id]" :alt="att.fileName" class="progressThumb" />
+                      </template>
+                      <div class="attName" style="margin-top: 6px">{{ att.fileName }}</div>
+                      <div class="meta">大小：{{ att.fileSize }} Byte</div>
+                      <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                        <el-button size="small" @click="previewProgressAttachment(att)">预览</el-button>
+                        <el-button size="small" @click="downloadProgressAttachment(att)">下载</el-button>
+                      </div>
+                    </div>
+                  </div>
+                </el-card>
+              </div>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="selectedTaskId">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>完成登记</div>
+                  <el-tag :type="completionStatusType(completionInfo?.status)">{{ completionStatusText(completionInfo?.status) }}</el-tag>
+                </div>
+              </template>
+              <div class="meta">当前状态：{{ completionStatusText(completionInfo?.status) }}</div>
+              <div v-if="completionInfo?.requestedAt" class="meta">申请时间：{{ completionInfo.requestedAt }}</div>
+              <div v-if="completionInfo?.confirmedAt" class="meta">确认时间：{{ completionInfo.confirmedAt }}</div>
+              <div v-if="completionInfo?.confirmedByDisplayName" class="meta">确认教师：{{ completionInfo.confirmedByDisplayName }}</div>
+              <div style="margin-top: 12px">
+                <el-button
+                  type="primary"
+                  :loading="completionSubmitting || completionLoading"
+                  :disabled="completionInfo?.status !== 'NONE'"
+                  @click="submitCompletionRequest"
+                >
+                  完成全部步骤并提交登记
+                </el-button>
+              </div>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="selectedTaskId">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>设备申请</div>
+                  <el-button size="small" :loading="loadingDeviceRequests" @click="loadDeviceRequests">刷新申请记录</el-button>
+                </div>
+              </template>
+              <div v-if="loadingTaskDevices" class="meta">加载中...</div>
+              <div v-else-if="taskDevices.length === 0" class="meta">当前任务未配置可借设备</div>
+              <div v-else class="deviceGrid">
+                <div v-for="device in taskDevices" :key="device.deviceId" class="deviceBox">
+                  <div class="progressTitle">{{ device.deviceName }}</div>
+                  <div class="meta">编码：{{ device.deviceCode }}</div>
+                  <div class="meta">任务上限：{{ device.configuredQuantity }}</div>
+                  <div class="meta">总库存：{{ device.totalQuantity }}</div>
+                  <div class="meta">已占用：{{ device.reservedQuantity }}</div>
+                  <div class="meta">当前可申请：{{ device.availableQuantity }}</div>
+                </div>
+              </div>
+
+              <div v-if="taskDevices.length > 0" class="progressComposer" style="margin-top: 12px">
+                <el-select v-model="deviceForm.deviceId" placeholder="选择设备" style="width: 320px">
+                  <el-option
+                    v-for="device in taskDevices"
+                    :key="device.deviceId"
+                    :label="`${device.deviceName}（可申请 ${device.availableQuantity}）`"
+                    :value="device.deviceId"
+                  />
+                </el-select>
+                <el-input-number v-model="deviceForm.quantity" :min="1" :max="999" />
+                <el-input v-model="deviceForm.note" type="textarea" :rows="3" placeholder="申请说明（可选）" />
+                <div>
+                  <el-button type="primary" :loading="deviceSubmitting" @click="submitDeviceRequest">提交设备申请</el-button>
+                </div>
+              </div>
+
+              <div style="margin-top: 12px">
+                <el-table v-if="!isMobile" :data="deviceRequests" size="small" v-loading="loadingDeviceRequests">
+                  <el-table-column prop="deviceName" label="设备" min-width="160" />
+                  <el-table-column prop="quantity" label="数量" width="80" />
+                  <el-table-column prop="status" label="状态" width="140" />
+                  <el-table-column prop="createdAt" label="申请时间" min-width="180" />
+                  <el-table-column label="记录">
+                    <template #default="{ row }: { row: TaskDeviceRequestVO }">
+                      <div v-if="row.note" class="meta">说明：{{ row.note }}</div>
+                      <div v-if="row.approvedAt" class="meta">通过：{{ row.approvedAt }}</div>
+                      <div v-if="row.checkoutAt" class="meta">借出：{{ row.checkoutAt }}</div>
+                      <div v-if="row.returnAt" class="meta">归还：{{ row.returnAt }}</div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div v-else-if="deviceRequests.length === 0" class="meta">暂无设备申请记录</div>
+                <el-card v-else v-for="row in deviceRequests" :key="row.id" shadow="never" class="subCard">
+                  <div class="taskRow">
+                    <div class="progressTitle">{{ row.deviceName }}</div>
+                    <el-tag size="small">{{ row.status }}</el-tag>
+                  </div>
+                  <div class="meta">数量：{{ row.quantity }}</div>
+                  <div class="meta">申请时间：{{ row.createdAt }}</div>
+                  <div v-if="row.note" class="meta">说明：{{ row.note }}</div>
+                  <div v-if="row.approvedAt" class="meta">通过时间：{{ row.approvedAt }}</div>
+                  <div v-if="row.checkoutAt" class="meta">借出时间：{{ row.checkoutAt }}</div>
+                  <div v-if="row.returnAt" class="meta">归还时间：{{ row.returnAt }}</div>
+                </el-card>
+              </div>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="selectedTaskId">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
                   <div>提交报告</div>
                   <el-button type="primary" size="small" :loading="submitting" @click="submit">提交</el-button>
                 </div>
@@ -715,6 +1347,7 @@ onMounted(async () => {
                 <el-button type="primary" :loading="loadingWeek" @click="loadWeek">加载课表</el-button>
               </div>
               <div v-if="scheduleError" class="scheduleEmpty" style="margin-top: 12px">{{ scheduleError }}</div>
+              <div v-else-if="scheduleEmptyHint" class="scheduleEmpty" style="margin-top: 12px">当前周暂无课表，请切换周次或学期</div>
               <div v-else class="grid" v-loading="loadingWeek">
                 <table class="week-table">
                   <thead>
@@ -895,6 +1528,9 @@ onMounted(async () => {
 .subCard {
   margin-bottom: 10px;
 }
+.innerCard {
+  margin-bottom: 10px;
+}
 .attCard {
   margin-bottom: 10px;
 }
@@ -926,6 +1562,53 @@ onMounted(async () => {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+.progressComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.progressCard {
+  margin-bottom: 10px;
+}
+.progressTitle {
+  font-weight: 700;
+}
+.progressAtts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.progressAtt {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fafcff;
+}
+.progressThumb {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
+}
+.deviceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.deviceBox {
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fafcff;
+}
+.deviceForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .grid {
   overflow-x: auto;

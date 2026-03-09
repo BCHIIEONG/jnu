@@ -7,17 +7,15 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("device")
-public class DeviceEntity {
+@TableName("task_completion")
+public class TaskCompletionEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String code;
-    private String name;
+    private Long taskId;
+    private Long studentId;
     private String status;
-    private Integer totalQuantity;
-    private String location;
-    private String description;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
+    private LocalDateTime requestedAt;
+    private LocalDateTime confirmedAt;
+    private Long confirmedBy;
 }

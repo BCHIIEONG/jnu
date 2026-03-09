@@ -10,6 +10,7 @@ import cn.edu.jnu.labflowreport.schedule.service.ScheduleService;
 import cn.edu.jnu.labflowreport.schedule.vo.TeacherWeekScheduleItemVO;
 import cn.edu.jnu.labflowreport.schedule.vo.TimeSlotVO;
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,7 +41,11 @@ public class TeacherScheduleController {
 
     @GetMapping("/semesters")
     public ApiResponse<List<TeacherSemesterVO>> listSemesters() {
-        List<SemesterEntity> list = semesterMapper.selectList(null);
+        List<SemesterEntity> list = semesterMapper.selectList(null).stream()
+                .sorted(Comparator
+                        .comparing(SemesterEntity::getStartDate, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(SemesterEntity::getId, Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
         return ApiResponse.success(list.stream()
                 .map(s -> new TeacherSemesterVO(s.getId(), s.getName(), s.getStartDate(), s.getEndDate()))
                 .toList());

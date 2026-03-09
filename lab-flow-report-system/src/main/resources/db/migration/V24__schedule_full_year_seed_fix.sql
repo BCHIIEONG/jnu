@@ -1,0 +1,4777 @@
+-- Repair corrupted V23 full-year demo schedule seed and make Flyway-only setup self-sufficient.
+
+INSERT INTO semester (name, start_date, end_date)
+SELECT '2025-2026-1', DATE '2025-09-01', DATE '2026-01-16'
+WHERE NOT EXISTS (SELECT 1 FROM semester WHERE name = '2025-2026-1');
+
+INSERT INTO semester (name, start_date, end_date)
+SELECT '2025-2026-2', DATE '2026-02-16', DATE '2026-06-30'
+WHERE NOT EXISTS (SELECT 1 FROM semester WHERE name = '2025-2026-2');
+
+INSERT INTO time_slot (code, name, start_time, end_time)
+SELECT 'S4', '第7-8节', TIME '15:50:00', TIME '17:30:00'
+WHERE NOT EXISTS (SELECT 1 FROM time_slot WHERE code = 'S4');
+UPDATE time_slot SET name = '第7-8节', start_time = TIME '15:50:00', end_time = TIME '17:30:00' WHERE code = 'S4';
+
+INSERT INTO time_slot (code, name, start_time, end_time)
+SELECT 'S5', '第10-12节', TIME '18:30:00', TIME '21:05:00'
+WHERE NOT EXISTS (SELECT 1 FROM time_slot WHERE code = 'S5');
+UPDATE time_slot SET name = '第10-12节', start_time = TIME '18:30:00', end_time = TIME '21:05:00' WHERE code = 'S5';
+
+INSERT INTO lab_room (name, location, open_hours)
+SELECT 'N325', '教学楼 N325', '周一至周五 08:00-21:30'
+WHERE NOT EXISTS (SELECT 1 FROM lab_room WHERE name = 'N325');
+UPDATE lab_room SET location = '教学楼 N325', open_hours = '周一至周五 08:00-21:30' WHERE name = 'N325';
+
+INSERT INTO lab_room (name, location, open_hours)
+SELECT 'N326', '教学楼 N326', '周一至周五 08:00-21:30'
+WHERE NOT EXISTS (SELECT 1 FROM lab_room WHERE name = 'N326');
+UPDATE lab_room SET location = '教学楼 N326', open_hours = '周一至周五 08:00-21:30' WHERE name = 'N326';
+
+INSERT INTO lab_room (name, location, open_hours)
+SELECT 'N328', '教学楼 N328', '周一至周五 08:00-21:30'
+WHERE NOT EXISTS (SELECT 1 FROM lab_room WHERE name = 'N328');
+UPDATE lab_room SET location = '教学楼 N328', open_hours = '周一至周五 08:00-21:30' WHERE name = 'N328';
+
+-- Remove corrupted demo rows inserted by V23 for the two demo classes before re-seeding correct rows.
+DELETE FROM course_schedule
+WHERE semester_id IN (SELECT id FROM semester WHERE name IN ('2025-2026-1', '2025-2026-2'))
+  AND teacher_id IN (SELECT id FROM sys_user WHERE username = 'teacher')
+  AND class_id IN (
+      SELECT id FROM org_class
+      WHERE name IN ('2022级软件工程1班', '2022级化学1班')
+         OR (grade = 2022 AND name IN ('软件工程1班', '化学1班'))
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-01', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-02', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-03', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-04', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-05', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-01', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-02', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-04', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-05', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-08', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-09', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-11', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-12', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-08', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-09', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-11', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-12', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-15', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-16', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-17', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-18', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-19', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-15', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-16', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-18', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-19', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-22', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-23', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-25', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-26', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-22', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-23', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-25', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-26', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-29', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-30', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-01', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-02', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-03', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-29', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-09-30', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-09-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-02', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-03', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-06', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-07', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-09', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-10', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-06', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-07', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-09', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-10', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-13', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-14', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-15', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-16', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-17', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-13', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-14', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-16', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-17', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-20', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-21', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-23', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-24', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-20', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-21', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-23', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-24', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-27', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-28', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-29', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-30', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-31', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-31' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-27', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-28', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-30', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-10-31', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-10-31' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-03', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-04', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-06', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-07', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-03', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-04', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-06', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-07', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-10', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-11', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-12', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-13', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-14', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-10', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-11', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-13', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-14', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-17', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-18', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-20', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-21', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-17', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-18', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-20', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-21', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-24', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-25', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-26', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-27', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-28', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-24', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-25', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-27', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-11-28', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-11-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-01', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-02', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-04', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-05', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-01', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-02', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-04', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-05', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-08', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-09', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-10', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-11', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-12', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-08', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-09', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-11', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-12', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-15', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-16', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-18', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-19', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-15', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-16', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-18', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-19', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-22', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-23', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-24', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-25', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-26', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-22', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-23', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-25', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-26', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-29', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-30', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-01', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-02', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-29', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2025-12-30', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2025-12-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-01', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-02', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-05', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-06', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-07', ts.id, '高级语言程序设计'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N324'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-08', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-09', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-05', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-06', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-08', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-09', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-12', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-13', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-15', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N328'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-16', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-12', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-13', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-15', ts.id, '化工原理'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-01-16', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-1'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-01-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-16', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-17', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-18', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-18', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-19', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-20', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-16', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-17', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-18', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-19', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-23', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-24', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-25', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-25', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-26', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-27', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-23', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-24', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-25', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-02-26', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-02-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-02', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-03', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-04', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-04', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-05', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-06', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-02', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-03', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-04', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-05', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-09', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-10', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-11', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-11', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-12', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-13', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-09', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-10', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-11', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-12', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-16', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-17', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-18', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-18', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-19', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-20', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-16', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-17', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-18', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-19', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-23', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-24', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-25', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-25', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-26', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-27', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-23', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-24', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-25', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-26', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-30', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-31', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-31' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-01', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-01', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-02', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-03', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-30', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-03-31', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-03-31' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-01', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-02', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-06', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-07', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-08', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-08', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-09', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-10', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-06', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-07', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-08', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-09', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-13', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-14', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-15', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-15', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-16', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-17', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-13', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-14', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-15', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-16', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-20', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-21', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-22', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-22', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-23', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-24', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-20', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-21', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-22', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-23', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-27', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-28', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-29', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-29', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-30', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-01', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-27', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-28', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-29', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-04-30', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-04-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-04', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-05', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-06', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-06', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-07', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-08', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-04', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-05', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-06', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-06' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-07', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-07' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-11', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-12', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-13', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-13', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-14', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-15', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-11', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-12', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-13', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-13' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-14', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-14' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-18', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-19', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-20', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-20', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-21', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-22', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-18', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-19', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-20', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-20' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-21', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-21' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-25', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-26', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-27', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-27', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-28', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-29', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-25', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-26', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-27', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-27' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-05-28', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-05-28' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-01', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-02', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-03', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-03', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-04', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-05', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-05' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-01', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-01' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-02', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-02' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-03', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-03' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-04', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-04' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-08', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-09', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-10', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-10', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-11', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-12', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-12' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-08', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-08' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-09', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-09' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-10', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-10' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-11', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-11' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-15', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-16', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-17', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-17', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-18', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-19', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'DF-107'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-19' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-15', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-15' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-16', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-16' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-17', ts.id, '仪器分析实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S4'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-17' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-18', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-18' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-22', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-23', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-24', ts.id, '大学英语一级'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '外语楼 201'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-24', ts.id, '中国传统文化概论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N327'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-25', ts.id, '高等数学I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N319'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-26', ts.id, '软件工程导论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N326'
+JOIN time_slot ts ON ts.code = 'S5'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-26' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-22', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-22' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-23', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-23' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-24', ts.id, '有机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-24' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-25', ts.id, '分析化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-25' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-29', ts.id, '线性代数引论'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = 'N329'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-30', ts.id, '体育I'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级软件工程1班' OR (c.grade = 2022 AND c.name = '软件工程1班'))
+JOIN lab_room r ON r.name = '体育馆'
+JOIN time_slot ts ON ts.code = 'S2'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-30' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-29', ts.id, '分析化学实验'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 B203'
+JOIN time_slot ts ON ts.code = 'S1'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-29' AND x.slot_id = ts.id
+  );
+
+INSERT INTO course_schedule (semester_id, class_id, teacher_id, lab_room_id, lesson_date, slot_id, course_name)
+SELECT s.id, c.id, t.id, r.id, DATE '2026-06-30', ts.id, '无机化学'
+FROM semester s
+JOIN sys_user t ON t.username = 'teacher'
+JOIN org_class c ON (c.name = '2022级化学1班' OR (c.grade = 2022 AND c.name = '化学1班'))
+JOIN lab_room r ON r.name = '实验室 A101'
+JOIN time_slot ts ON ts.code = 'S3'
+WHERE s.name = '2025-2026-2'
+  AND NOT EXISTS (
+      SELECT 1 FROM course_schedule x
+      WHERE x.semester_id = s.id AND x.class_id = c.id AND x.lesson_date = DATE '2026-06-30' AND x.slot_id = ts.id
+  );
+

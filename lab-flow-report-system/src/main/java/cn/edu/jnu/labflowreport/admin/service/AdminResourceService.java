@@ -159,7 +159,7 @@ public class AdminResourceService {
             w.eq(DeviceEntity::getStatus, status);
         }
         return deviceMapper.selectList(w).stream()
-                .map(d -> new AdminDeviceVO(d.getId(), d.getCode(), d.getName(), d.getStatus(), d.getLocation(), d.getDescription(), d.getCreatedAt(), d.getUpdatedAt()))
+                .map(d -> new AdminDeviceVO(d.getId(), d.getCode(), d.getName(), d.getTotalQuantity(), d.getStatus(), d.getLocation(), d.getDescription(), d.getCreatedAt(), d.getUpdatedAt()))
                 .toList();
     }
 
@@ -174,6 +174,7 @@ public class AdminResourceService {
         DeviceEntity entity = new DeviceEntity();
         entity.setCode(request.code().trim());
         entity.setName(request.name().trim());
+        entity.setTotalQuantity(request.totalQuantity());
         entity.setStatus(StringUtils.hasText(request.status()) ? request.status().trim() : "AVAILABLE");
         entity.setLocation(request.location());
         entity.setDescription(request.description());
@@ -181,7 +182,7 @@ public class AdminResourceService {
         entity.setUpdatedAt(LocalDateTime.now());
         deviceMapper.insert(entity);
         adminAuditService.record(actor, AdminAuditActions.DEVICE_CREATE, "device", entity.getId(), Map.of("code", entity.getCode(), "name", entity.getName()));
-        return new AdminDeviceVO(entity.getId(), entity.getCode(), entity.getName(), entity.getStatus(), entity.getLocation(), entity.getDescription(), entity.getCreatedAt(), entity.getUpdatedAt());
+        return new AdminDeviceVO(entity.getId(), entity.getCode(), entity.getName(), entity.getTotalQuantity(), entity.getStatus(), entity.getLocation(), entity.getDescription(), entity.getCreatedAt(), entity.getUpdatedAt());
     }
 
     @Transactional
@@ -201,13 +202,14 @@ public class AdminResourceService {
                 .eq(DeviceEntity::getId, id)
                 .set(DeviceEntity::getCode, request.code().trim())
                 .set(DeviceEntity::getName, request.name().trim())
+                .set(DeviceEntity::getTotalQuantity, request.totalQuantity())
                 .set(DeviceEntity::getStatus, StringUtils.hasText(request.status()) ? request.status().trim() : "AVAILABLE")
                 .set(DeviceEntity::getLocation, request.location())
                 .set(DeviceEntity::getDescription, request.description())
                 .set(DeviceEntity::getUpdatedAt, LocalDateTime.now()));
         adminAuditService.record(actor, AdminAuditActions.DEVICE_UPDATE, "device", id, Map.of("code", request.code().trim()));
         DeviceEntity updated = deviceMapper.selectById(id);
-        return new AdminDeviceVO(updated.getId(), updated.getCode(), updated.getName(), updated.getStatus(), updated.getLocation(), updated.getDescription(), updated.getCreatedAt(), updated.getUpdatedAt());
+        return new AdminDeviceVO(updated.getId(), updated.getCode(), updated.getName(), updated.getTotalQuantity(), updated.getStatus(), updated.getLocation(), updated.getDescription(), updated.getCreatedAt(), updated.getUpdatedAt());
     }
 
     @Transactional
@@ -223,11 +225,12 @@ public class AdminResourceService {
     public String exportDevicesCsv(AuthenticatedUser actor) {
         List<AdminDeviceVO> devices = listDevices(null, null);
         StringBuilder csv = new StringBuilder();
-        csv.append("id,code,name,status,location,description,createdAt\n");
+        csv.append("id,code,name,totalQuantity,status,location,description,createdAt\n");
         for (AdminDeviceVO d : devices) {
             csv.append(AdminCsv.cell(d.id())).append(",");
             csv.append(AdminCsv.cell(d.code())).append(",");
             csv.append(AdminCsv.cell(d.name())).append(",");
+            csv.append(AdminCsv.cell(d.totalQuantity())).append(",");
             csv.append(AdminCsv.cell(d.status())).append(",");
             csv.append(AdminCsv.cell(d.location())).append(",");
             csv.append(AdminCsv.cell(d.description())).append(",");

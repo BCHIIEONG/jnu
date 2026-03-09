@@ -74,6 +74,22 @@ public class FileStorageService {
         return new SaveResult(relative.replace('\\', '/'), toHex(md.digest()));
     }
 
+    public SaveResult saveTaskProgressAttachmentWithSha256(Long progressLogId, MultipartFile file) {
+        if (progressLogId == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "progressLogId 不能为空");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "请选择要上传的文件");
+        }
+
+        String originalName = Objects.toString(file.getOriginalFilename(), "attachment");
+        String safeName = sanitizeFilename(originalName);
+        String ext = extractExt(safeName);
+        String storedName = UUID.randomUUID().toString().replace("-", "") + ext;
+        String relative = Path.of("task-progress-attachments", String.valueOf(progressLogId), storedName).toString();
+        return saveWithSha256(file, relative);
+    }
+
     public byte[] readBytes(String relativePath) {
         Path target = resolveUnderBase(relativePath);
         try {
@@ -109,6 +125,34 @@ public class FileStorageService {
             return "";
         }
         return ext;
+    }
+
+    private SaveResult saveWithSha256(MultipartFile file, String relative) {
+        Path target = resolveUnderBase(relative);
+
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "SHA-256 不可用");
+        }
+
+        try {
+            Files.createDirectories(target.getParent());
+            try (InputStream in = file.getInputStream()) {
+                try (var out = Files.newOutputStream(target)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        md.update(buf, 0, n);
+                        out.write(buf, 0, n);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "文件保存失败");
+        }
+        return new SaveResult(relative.replace('\\', '/'), toHex(md.digest()));
     }
 
     private String toHex(byte[] bytes) {

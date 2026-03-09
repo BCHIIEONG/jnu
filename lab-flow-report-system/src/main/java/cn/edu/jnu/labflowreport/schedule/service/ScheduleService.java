@@ -218,7 +218,11 @@ public class ScheduleService {
     public List<TeacherWeekScheduleItemVO> listTeacherWeek(Long teacherId, Long semesterId, LocalDate weekStartDate) {
         LocalDate from = weekStartDate;
         LocalDate to = weekStartDate.plusDays(6);
-        return courseScheduleMapper.findTeacherWeek(teacherId, semesterId, from, to);
+        List<TeacherWeekScheduleItemVO> own = courseScheduleMapper.findTeacherWeek(teacherId, semesterId, from, to);
+        if (!own.isEmpty()) {
+            return own;
+        }
+        return courseScheduleMapper.findWeekAnyTeacher(semesterId, from, to);
     }
 
     public List<CourseScheduleVO> listStudentWeek(Long userId, Long semesterId, LocalDate weekStartDate) {

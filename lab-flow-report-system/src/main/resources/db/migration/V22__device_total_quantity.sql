@@ -1,0 +1,2 @@
+ALTER TABLE device
+    ADD COLUMN IF NOT EXISTS total_quantity INT NOT NULL DEFAULT 1;

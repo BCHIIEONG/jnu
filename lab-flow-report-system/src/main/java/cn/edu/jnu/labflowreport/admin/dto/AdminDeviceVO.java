@@ -6,6 +6,7 @@ public record AdminDeviceVO(
         Long id,
         String code,
         String name,
+        Integer totalQuantity,
         String status,
         String location,
         String description,
@@ -13,4 +14,3 @@ public record AdminDeviceVO(
         LocalDateTime updatedAt
 ) {
 }
-

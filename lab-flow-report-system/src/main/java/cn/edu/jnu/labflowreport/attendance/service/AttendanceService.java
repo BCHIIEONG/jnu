@@ -385,25 +385,28 @@ public class AttendanceService {
             int page,
             int size
     ) {
-        if (!actor.roleCodes().contains("ROLE_TEACHER")) {
+        boolean isAdmin = actor.roleCodes().contains("ROLE_ADMIN");
+        boolean isTeacher = actor.roleCodes().contains("ROLE_TEACHER");
+        if (!isTeacher && !isAdmin) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限查看历史签到");
         }
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 200);
         int offset = (safePage - 1) * safeSize;
-        long total = sessionMapper.countTeacherHistorySessions(actor.userId(), grade, classId, roomKeyword, from, to, status);
+        Long teacherId = isAdmin ? null : actor.userId();
+        long total = sessionMapper.countTeacherHistorySessions(teacherId, grade, classId, roomKeyword, from, to, status);
         if (total <= 0) {
             return new PageResult<>(safePage, safeSize, 0, List.of());
         }
         List<TeacherAttendanceSessionListItemVO> items = sessionMapper.findTeacherHistorySessions(
-                actor.userId(), grade, classId, roomKeyword, from, to, status, safeSize, offset
+                teacherId, grade, classId, roomKeyword, from, to, status, safeSize, offset
         );
         items.forEach(this::normalizeHistoryItem);
         return new PageResult<>(safePage, safeSize, total, items);
     }
 
     public TeacherAttendanceSessionDetailVO getTeacherSessionDetail(AuthenticatedUser actor, Long sessionId) {
-        if (!actor.roleCodes().contains("ROLE_TEACHER")) {
+        if (!actor.roleCodes().contains("ROLE_TEACHER") && !actor.roleCodes().contains("ROLE_ADMIN")) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限查看历史签到");
         }
         AttendanceSessionEntity session = getSessionOrThrow(sessionId);

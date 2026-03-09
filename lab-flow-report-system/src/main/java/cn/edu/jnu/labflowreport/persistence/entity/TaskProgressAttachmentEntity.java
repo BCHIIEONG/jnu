@@ -7,17 +7,16 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("device")
-public class DeviceEntity {
+@TableName("task_progress_attachment")
+public class TaskProgressAttachmentEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String code;
-    private String name;
-    private String status;
-    private Integer totalQuantity;
-    private String location;
-    private String description;
+    private Long progressLogId;
+    private String fileName;
+    private String contentType;
+    private Long fileSize;
+    private String relativePath;
+    private String fileSha256;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }
