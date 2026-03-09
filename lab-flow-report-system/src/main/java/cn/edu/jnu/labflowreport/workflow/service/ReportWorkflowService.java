@@ -8,14 +8,22 @@ import cn.edu.jnu.labflowreport.common.util.HashUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskTargetClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExportRecordEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportReviewEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportSubmissionEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskAttachmentEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskProgressAttachmentEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskTargetClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExportRecordMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.PlagArtifactFpMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.PlagSubmissionBestMatchMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.PlagTaskRunMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportReviewMapper;
@@ -25,6 +33,7 @@ import cn.edu.jnu.labflowreport.persistence.mapper.TaskAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskCompletionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceConfigMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceRequestMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressLogMapper;
 import cn.edu.jnu.labflowreport.storage.FileStorageService;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
@@ -61,10 +70,13 @@ public class ReportWorkflowService {
     private final SysUserMapper sysUserMapper;
     private final TaskAttachmentMapper taskAttachmentMapper;
     private final TaskProgressLogMapper taskProgressLogMapper;
+    private final TaskProgressAttachmentMapper taskProgressAttachmentMapper;
     private final TaskCompletionMapper taskCompletionMapper;
     private final TaskDeviceConfigMapper taskDeviceConfigMapper;
     private final TaskDeviceRequestMapper taskDeviceRequestMapper;
     private final PlagTaskRunMapper plagTaskRunMapper;
+    private final PlagArtifactFpMapper plagArtifactFpMapper;
+    private final PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper;
 
     public ReportWorkflowService(
             ExpTaskMapper expTaskMapper,
@@ -77,10 +89,13 @@ public class ReportWorkflowService {
             SysUserMapper sysUserMapper,
             TaskAttachmentMapper taskAttachmentMapper,
             TaskProgressLogMapper taskProgressLogMapper,
+            TaskProgressAttachmentMapper taskProgressAttachmentMapper,
             TaskCompletionMapper taskCompletionMapper,
             TaskDeviceConfigMapper taskDeviceConfigMapper,
             TaskDeviceRequestMapper taskDeviceRequestMapper,
-            PlagTaskRunMapper plagTaskRunMapper
+            PlagTaskRunMapper plagTaskRunMapper,
+            PlagArtifactFpMapper plagArtifactFpMapper,
+            PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper
     ) {
         this.expTaskMapper = expTaskMapper;
         this.submissionMapper = submissionMapper;
@@ -92,10 +107,13 @@ public class ReportWorkflowService {
         this.sysUserMapper = sysUserMapper;
         this.taskAttachmentMapper = taskAttachmentMapper;
         this.taskProgressLogMapper = taskProgressLogMapper;
+        this.taskProgressAttachmentMapper = taskProgressAttachmentMapper;
         this.taskCompletionMapper = taskCompletionMapper;
         this.taskDeviceConfigMapper = taskDeviceConfigMapper;
         this.taskDeviceRequestMapper = taskDeviceRequestMapper;
         this.plagTaskRunMapper = plagTaskRunMapper;
+        this.plagArtifactFpMapper = plagArtifactFpMapper;
+        this.plagSubmissionBestMatchMapper = plagSubmissionBestMatchMapper;
     }
 
     @Transactional
@@ -206,19 +224,70 @@ public class ReportWorkflowService {
     @Transactional
     public void deleteTask(Long taskId, AuthenticatedUser actor) {
         ensureTeacherOrAdminCanManageTask(taskId, actor);
-        ensureTaskCanBeDeleted(taskId);
+        getTaskEntityOrThrow(taskId);
 
-        List<TaskAttachmentEntity> attachments = taskAttachmentMapper.findByTaskId(taskId);
-        for (TaskAttachmentEntity attachment : attachments) {
-            taskAttachmentMapper.deleteById(attachment.getId());
-            storageService.delete(attachment.getFilePath());
+        List<TaskAttachmentEntity> taskAttachments = taskAttachmentMapper.findByTaskId(taskId);
+        List<ReportSubmissionEntity> submissions = submissionMapper.selectList(new LambdaQueryWrapper<ReportSubmissionEntity>()
+                .eq(ReportSubmissionEntity::getTaskId, taskId));
+        List<Long> submissionIds = submissions.stream()
+                .map(ReportSubmissionEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<ReportAttachmentEntity> reportAttachments = new ArrayList<>();
+        if (!submissionIds.isEmpty()) {
+            reportAttachments = attachmentMapper.selectList(new LambdaQueryWrapper<ReportAttachmentEntity>()
+                    .in(ReportAttachmentEntity::getSubmissionId, submissionIds));
         }
 
-        taskDeviceConfigMapper.delete(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity>()
-                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity::getTaskId, taskId));
+        List<TaskProgressLogEntity> progressLogs = taskProgressLogMapper.selectList(new LambdaQueryWrapper<TaskProgressLogEntity>()
+                .eq(TaskProgressLogEntity::getTaskId, taskId));
+        List<Long> progressLogIds = progressLogs.stream()
+                .map(TaskProgressLogEntity::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        List<TaskProgressAttachmentEntity> progressAttachments = new ArrayList<>();
+        if (!progressLogIds.isEmpty()) {
+            progressAttachments = taskProgressAttachmentMapper.selectList(new LambdaQueryWrapper<TaskProgressAttachmentEntity>()
+                    .in(TaskProgressAttachmentEntity::getProgressLogId, progressLogIds));
+        }
+
+        if (!submissionIds.isEmpty()) {
+            reviewMapper.delete(new LambdaQueryWrapper<ReportReviewEntity>()
+                    .in(ReportReviewEntity::getSubmissionId, submissionIds));
+            attachmentMapper.delete(new LambdaQueryWrapper<ReportAttachmentEntity>()
+                    .in(ReportAttachmentEntity::getSubmissionId, submissionIds));
+        }
+
+        if (!progressLogIds.isEmpty()) {
+            taskProgressAttachmentMapper.delete(new LambdaQueryWrapper<TaskProgressAttachmentEntity>()
+                    .in(TaskProgressAttachmentEntity::getProgressLogId, progressLogIds));
+        }
+
+        plagSubmissionBestMatchMapper.delete(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.PlagSubmissionBestMatchEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.PlagSubmissionBestMatchEntity::getTaskId, taskId));
+        plagArtifactFpMapper.delete(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.PlagArtifactFpEntity>()
+                .eq(cn.edu.jnu.labflowreport.persistence.entity.PlagArtifactFpEntity::getTaskId, taskId));
+        plagTaskRunMapper.delete(new LambdaQueryWrapper<PlagTaskRunEntity>()
+                .eq(PlagTaskRunEntity::getTaskId, taskId));
+        taskCompletionMapper.delete(new LambdaQueryWrapper<TaskCompletionEntity>()
+                .eq(TaskCompletionEntity::getTaskId, taskId));
+        taskDeviceRequestMapper.delete(new LambdaQueryWrapper<TaskDeviceRequestEntity>()
+                .eq(TaskDeviceRequestEntity::getTaskId, taskId));
+        taskDeviceConfigMapper.delete(new LambdaQueryWrapper<TaskDeviceConfigEntity>()
+                .eq(TaskDeviceConfigEntity::getTaskId, taskId));
+        taskProgressLogMapper.delete(new LambdaQueryWrapper<TaskProgressLogEntity>()
+                .eq(TaskProgressLogEntity::getTaskId, taskId));
+        taskAttachmentMapper.delete(new LambdaQueryWrapper<TaskAttachmentEntity>()
+                .eq(TaskAttachmentEntity::getTaskId, taskId));
         taskTargetClassMapper.delete(new LambdaQueryWrapper<ExpTaskTargetClassEntity>()
                 .eq(ExpTaskTargetClassEntity::getTaskId, taskId));
+        submissionMapper.delete(new LambdaQueryWrapper<ReportSubmissionEntity>()
+                .eq(ReportSubmissionEntity::getTaskId, taskId));
         expTaskMapper.deleteById(taskId);
+
+        deleteStoredFiles(taskAttachments.stream().map(TaskAttachmentEntity::getFilePath).toList());
+        deleteStoredFiles(reportAttachments.stream().map(ReportAttachmentEntity::getFilePath).toList());
+        deleteStoredFiles(progressAttachments.stream().map(TaskProgressAttachmentEntity::getRelativePath).toList());
     }
 
     @Transactional
@@ -616,23 +685,6 @@ public class ReportWorkflowService {
                 .toList();
     }
 
-    private void ensureTaskCanBeDeleted(Long taskId) {
-        long submissionCount = submissionMapper.selectCount(new LambdaQueryWrapper<ReportSubmissionEntity>()
-                .eq(ReportSubmissionEntity::getTaskId, taskId));
-        long progressCount = taskProgressLogMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity>()
-                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity::getTaskId, taskId));
-        long completionCount = taskCompletionMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity>()
-                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity::getTaskId, taskId));
-        long deviceRequestCount = taskDeviceRequestMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity>()
-                .eq(cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity::getTaskId, taskId));
-        long plagRunCount = plagTaskRunMapper.selectCount(new LambdaQueryWrapper<cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity>()
-                .eq(cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity::getTaskId, taskId));
-
-        if (submissionCount > 0 || progressCount > 0 || completionCount > 0 || deviceRequestCount > 0 || plagRunCount > 0) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务已有业务记录，不能删除；如仅需停止使用，请关闭任务");
-        }
-    }
-
     private TaskAttachmentVO toTaskAttachmentVo(TaskAttachmentEntity entity) {
         TaskAttachmentVO vo = new TaskAttachmentVO();
         vo.setId(entity.getId());
@@ -643,6 +695,15 @@ public class ReportWorkflowService {
         vo.setUploadedBy(entity.getUploadedBy());
         vo.setUploadedAt(entity.getUploadedAt());
         return vo;
+    }
+
+    private void deleteStoredFiles(List<String> relativePaths) {
+        for (String relativePath : relativePaths) {
+            if (relativePath == null || relativePath.isBlank()) {
+                continue;
+            }
+            storageService.delete(relativePath);
+        }
     }
 
     public record DownloadData(String filename, String contentType, byte[] bytes) {
