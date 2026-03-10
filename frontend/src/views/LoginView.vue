@@ -68,12 +68,11 @@ async function submit() {
       <p class="sub">登录后将按角色进入学生/教师/管理员页面</p>
       <el-form @submit.prevent="submit" label-position="top">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="teacher / student / admin" @keyup.enter="submit" />
+          <el-input v-model="form.username" @keyup.enter="submit" />
         </el-form-item>
         <el-form-item label="密码">
           <el-input
             v-model="form.password"
-            placeholder="teacher123 / student123 / admin123"
             show-password
             @keyup.enter="submit"
           />
@@ -87,12 +86,6 @@ async function submit() {
         </div>
         <el-button type="primary" native-type="submit" :loading="auth.loading" style="width: 100%">登录</el-button>
       </el-form>
-      <div class="hint">
-        <div>演示账号：</div>
-        <div><code>teacher / teacher123</code>（教师）</div>
-        <div><code>student / student123</code>（学生）</div>
-        <div><code>admin / admin123</code>（管理员）</div>
-      </div>
     </div>
   </div>
 </template>
@@ -122,12 +115,6 @@ h1 {
   color: #666;
   font-size: 13px;
 }
-.hint {
-  margin-top: 16px;
-  font-size: 13px;
-  color: #444;
-  line-height: 1.6;
-}
 .modeRow {
   display: flex;
   gap: 10px;
@@ -144,10 +131,5 @@ h1 {
   display: flex;
   align-items: center;
   margin: 0 0 12px;
-}
-code {
-  background: #f3f3f3;
-  padding: 2px 6px;
-  border-radius: 6px;
 }
 </style>

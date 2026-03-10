@@ -21,6 +21,7 @@ public class CorsConfig {
             patterns = List.of(
                     "http://localhost:5173",
                     "http://127.0.0.1:5173",
+                    "https://*.trycloudflare.com",
                     "http://192.168.*.*:5173",
                     "http://10.*.*.*:5173",
                     "http://172.16.*.*:5173",

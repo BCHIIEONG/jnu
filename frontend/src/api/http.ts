@@ -19,17 +19,15 @@ export class ApiError extends Error {
   }
 }
 
-const DEFAULT_API_BASE =
-  typeof window === 'undefined'
-    ? 'http://localhost:8080'
-    : `${window.location.protocol}//${window.location.hostname}:8080`
+const DEFAULT_API_BASE = '/api'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE
 
 function buildUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path
+  if (API_BASE === '/api' && path.startsWith('/api')) return path
   const base = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE
-  return base + path
+  return path.startsWith('/') ? `${base}${path}` : `${base}/${path}`
 }
 
 async function parseJsonOrThrow<T>(res: Response): Promise<ApiResponse<T>> {
