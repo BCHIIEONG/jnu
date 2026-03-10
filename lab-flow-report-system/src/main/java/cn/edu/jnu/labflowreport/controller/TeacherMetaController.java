@@ -8,6 +8,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgDepartmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.SysUserClassMapper;
 import cn.edu.jnu.labflowreport.schedule.mapper.CourseScheduleMapper;
 import cn.edu.jnu.labflowreport.schedule.vo.TeacherClassVO;
 import java.util.List;
@@ -28,30 +29,37 @@ public class TeacherMetaController {
     private final CourseScheduleMapper courseScheduleMapper;
     private final OrgClassMapper orgClassMapper;
     private final OrgDepartmentMapper orgDepartmentMapper;
+    private final SysUserClassMapper sysUserClassMapper;
 
     public TeacherMetaController(
             CourseScheduleMapper courseScheduleMapper,
             OrgClassMapper orgClassMapper,
-            OrgDepartmentMapper orgDepartmentMapper
+            OrgDepartmentMapper orgDepartmentMapper,
+            SysUserClassMapper sysUserClassMapper
     ) {
         this.courseScheduleMapper = courseScheduleMapper;
         this.orgClassMapper = orgClassMapper;
         this.orgDepartmentMapper = orgDepartmentMapper;
+        this.sysUserClassMapper = sysUserClassMapper;
     }
 
     @GetMapping("/classes")
     public ApiResponse<List<TeacherClassVO>> listClasses(@RequestParam(required = false, defaultValue = "mine") String scope) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
         String s = (scope == null ? "mine" : scope.trim().toLowerCase(java.util.Locale.ROOT));
-        if (!s.equals("mine") && !s.equals("all")) {
+        if (!s.equals("mine") && !s.equals("all") && !s.equals("schedule")) {
             s = "mine";
         }
 
         if (s.equals("mine") && actor.roleCodes().contains("ROLE_TEACHER")) {
+            return ApiResponse.success(sysUserClassMapper.findBoundClassesByUserId(actor.userId()));
+        }
+
+        if (s.equals("schedule") && actor.roleCodes().contains("ROLE_TEACHER")) {
             return ApiResponse.success(courseScheduleMapper.findDistinctClassesForTeacher(actor.userId()));
         }
 
-        // all classes (or admin "mine")
+        // all classes (or admin "mine"/"schedule")
         List<OrgClassEntity> classes = orgClassMapper.selectList(null);
         Set<Long> depIds = classes.stream().map(OrgClassEntity::getDepartmentId).filter(x -> x != null).collect(Collectors.toSet());
         Map<Long, String> depNames = depIds.isEmpty()

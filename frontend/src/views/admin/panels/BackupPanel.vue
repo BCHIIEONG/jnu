@@ -19,14 +19,6 @@ async function dl(path: string, filename: string) {
 
 <template>
   <div class="panel">
-    <el-alert
-      title="说明"
-      type="info"
-      show-icon
-      :closable="false"
-      description="本项目不在后端提供一键 mysqldump（环境不可控）。管理员端提供可下载 CSV 导出 + 标准备份/恢复流程说明。"
-    />
-
     <div class="grid">
       <el-card shadow="never">
         <template #header>数据导出（CSV）</template>
@@ -42,7 +34,7 @@ async function dl(path: string, filename: string) {
       </el-card>
 
       <el-card shadow="never">
-        <template #header>备份/恢复流程（给老师看的口径）</template>
+        <template #header>备份/恢复流程</template>
         <div class="text">
           <div>1) 备份数据库（示例命令，按你机器实际路径调整）</div>
           <pre class="pre">C:\xampp\mysql\bin\mysqldump.exe -u root -p --databases lab_flow_report &gt; lab_flow_report_backup.sql</pre>
@@ -84,4 +76,3 @@ async function dl(path: string, filename: string) {
   white-space: pre-wrap;
 }
 </style>
-

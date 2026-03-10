@@ -159,20 +159,24 @@ async function submitCreate() {
     return
   }
   try {
+    const body: Record<string, unknown> = {
+      username: createForm.username,
+      displayName: createForm.displayName,
+      password: createForm.password || undefined,
+      enabled: createForm.enabled,
+      departmentId: createForm.departmentId ?? null,
+      roleCodes: createForm.roleCodes,
+    }
+    if (createIsTeacher.value) {
+      body.classIds = createForm.classIds
+    } else {
+      body.classId = createForm.classId ?? null
+    }
     await apiData<UserItem>(
       '/api/admin/users',
       {
         method: 'POST',
-        body: {
-          username: createForm.username,
-          displayName: createForm.displayName,
-          password: createForm.password || undefined,
-          enabled: createForm.enabled,
-          departmentId: createForm.departmentId ?? null,
-          classId: createIsTeacher.value ? null : createForm.classId ?? null,
-          classIds: createIsTeacher.value ? createForm.classIds : [],
-          roleCodes: createForm.roleCodes,
-        },
+        body,
       },
       token.value,
     )
@@ -209,18 +213,22 @@ async function submitEdit() {
     return
   }
   try {
+    const body: Record<string, unknown> = {
+      username: editForm.username,
+      displayName: editForm.displayName,
+      enabled: editForm.enabled,
+      departmentId: editForm.departmentId ?? null,
+    }
+    if (editIsTeacher.value) {
+      body.classIds = editForm.classIds
+    } else {
+      body.classId = editForm.classId ?? null
+    }
     await apiData<UserItem>(
       `/api/admin/users/${editTarget.value.id}`,
       {
         method: 'PUT',
-        body: {
-          username: editForm.username,
-          displayName: editForm.displayName,
-          enabled: editForm.enabled,
-          departmentId: editForm.departmentId ?? null,
-          classId: editIsTeacher.value ? null : editForm.classId ?? null,
-          classIds: editIsTeacher.value ? editForm.classIds : [],
-        },
+        body,
       },
       token.value,
     )

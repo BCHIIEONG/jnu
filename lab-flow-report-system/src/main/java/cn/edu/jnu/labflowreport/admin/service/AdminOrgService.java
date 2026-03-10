@@ -12,10 +12,14 @@ import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgDepartmentEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.SysUserClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.OrgDepartmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.SysUserClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
+import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
+import cn.edu.jnu.labflowreport.schedule.mapper.CourseScheduleMapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -32,17 +36,23 @@ public class AdminOrgService {
     private final OrgDepartmentMapper orgDepartmentMapper;
     private final OrgClassMapper orgClassMapper;
     private final SysUserMapper sysUserMapper;
+    private final SysUserClassMapper sysUserClassMapper;
+    private final CourseScheduleMapper courseScheduleMapper;
     private final AdminAuditService adminAuditService;
 
     public AdminOrgService(
             OrgDepartmentMapper orgDepartmentMapper,
             OrgClassMapper orgClassMapper,
             SysUserMapper sysUserMapper,
+            SysUserClassMapper sysUserClassMapper,
+            CourseScheduleMapper courseScheduleMapper,
             AdminAuditService adminAuditService
     ) {
         this.orgDepartmentMapper = orgDepartmentMapper;
         this.orgClassMapper = orgClassMapper;
         this.sysUserMapper = sysUserMapper;
+        this.sysUserClassMapper = sysUserClassMapper;
+        this.courseScheduleMapper = courseScheduleMapper;
         this.adminAuditService = adminAuditService;
     }
 
@@ -149,7 +159,7 @@ public class AdminOrgService {
                 .eq(OrgClassEntity::getName, request.name().trim())
                 .last("LIMIT 1"));
         if (dup != null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, "班级已存在");
+            throw new BusinessException(ApiCode.BAD_REQUEST, "同一院系下已存在相同年级和班级名称的记录");
         }
         OrgClassEntity entity = new OrgClassEntity();
         entity.setDepartmentId(request.departmentId());
@@ -183,7 +193,7 @@ public class AdminOrgService {
                 .ne(OrgClassEntity::getId, id)
                 .last("LIMIT 1"));
         if (dup != null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, "班级名称已被占用");
+            throw new BusinessException(ApiCode.BAD_REQUEST, "同一院系下已存在相同年级和班级名称的记录");
         }
         orgClassMapper.update(null, new LambdaUpdateWrapper<OrgClassEntity>()
                 .eq(OrgClassEntity::getId, id)
@@ -209,6 +219,16 @@ public class AdminOrgService {
         long userCount = sysUserMapper.selectCount(new LambdaQueryWrapper<SysUserEntity>().eq(SysUserEntity::getClassId, id));
         if (userCount > 0) {
             throw new BusinessException(ApiCode.BAD_REQUEST, "仍有用户归属该班级，禁止删除");
+        }
+        long teacherBindingCount = sysUserClassMapper.selectCount(new LambdaQueryWrapper<SysUserClassEntity>()
+                .eq(SysUserClassEntity::getClassId, id));
+        if (teacherBindingCount > 0) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "仍有教师绑定该班级，禁止删除");
+        }
+        long scheduleCount = courseScheduleMapper.selectCount(new LambdaQueryWrapper<CourseScheduleEntity>()
+                .eq(CourseScheduleEntity::getClassId, id));
+        if (scheduleCount > 0) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "课表仍在引用该班级，禁止删除");
         }
         orgClassMapper.deleteById(id);
         adminAuditService.record(actor, AdminAuditActions.CLASS_DELETE, "org_class", id, Map.of(

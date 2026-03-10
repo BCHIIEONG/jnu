@@ -204,6 +204,8 @@ public class AdminUserService {
         }
         List<String> roleCodes = normalizeRoleCodes(sysUserMapper.findRoleCodesByUserId(userId));
         validateRoleCombination(roleCodes);
+        List<Long> normalizedClassIds = normalizeClassIds(request.classIds(), request.classId());
+        boolean teacherUser = roleCodes.contains("ROLE_TEACHER");
 
         LambdaUpdateWrapper<SysUserEntity> upd = new LambdaUpdateWrapper<SysUserEntity>()
                 .eq(SysUserEntity::getId, userId)
@@ -239,27 +241,25 @@ public class AdminUserService {
             changed.put("departmentId", request.departmentId());
         }
         if (request.classId() != null) {
-            if (roleCodes.contains("ROLE_TEACHER")) {
+            if (teacherUser) {
                 throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "教师账号请使用多班级绑定");
             }
             upd.set(SysUserEntity::getClassId, request.classId());
             changed.put("classId", request.classId());
         }
         if (request.classIds() != null) {
-            if (!roleCodes.contains("ROLE_TEACHER")) {
+            if (!teacherUser) {
+                if (shouldIgnoreNonTeacherClassIds(request.classId(), normalizedClassIds)) {
+                    return applyUserUpdate(actor, userId, upd, changed);
+                }
                 throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "仅教师账号支持多班级绑定");
             }
             upd.set(SysUserEntity::getClassId, null);
-            replaceTeacherClassBindings(userId, roleCodes, normalizeClassIds(request.classIds(), request.classId()));
-            changed.put("classIds", normalizeClassIds(request.classIds(), request.classId()));
+            replaceTeacherClassBindings(userId, roleCodes, normalizedClassIds);
+            changed.put("classIds", normalizedClassIds);
         }
 
-        if (changed.isEmpty()) {
-            return getUser(userId);
-        }
-        sysUserMapper.update(null, upd);
-        adminAuditService.record(actor, AdminAuditActions.USER_UPDATE, "sys_user", userId, changed);
-        return getUser(userId);
+        return applyUserUpdate(actor, userId, upd, changed);
     }
 
     @Transactional
@@ -574,6 +574,27 @@ public class AdminUserService {
 
     private static Long resolveSingleClassId(List<String> roleCodes, Long classId) {
         return roleCodes.contains("ROLE_TEACHER") ? null : classId;
+    }
+
+    private static boolean shouldIgnoreNonTeacherClassIds(Long classId, List<Long> classIds) {
+        if (classIds == null || classIds.isEmpty()) {
+            return true;
+        }
+        return classId != null && classIds.size() == 1 && Objects.equals(classIds.get(0), classId);
+    }
+
+    private AdminUserVO applyUserUpdate(
+            AuthenticatedUser actor,
+            Long userId,
+            LambdaUpdateWrapper<SysUserEntity> upd,
+            Map<String, Object> changed
+    ) {
+        if (changed.isEmpty()) {
+            return getUser(userId);
+        }
+        sysUserMapper.update(null, upd);
+        adminAuditService.record(actor, AdminAuditActions.USER_UPDATE, "sys_user", userId, changed);
+        return getUser(userId);
     }
 
     private static String safeTrim(String s) {

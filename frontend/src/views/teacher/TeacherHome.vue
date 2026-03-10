@@ -1050,7 +1050,7 @@ async function loadHistoryClassOptions() {
   loadingHistoryClasses.value = true
   try {
     historyClassOptions.value = await apiData<TeacherClassVO[]>(
-      '/api/teacher/classes?scope=mine',
+      '/api/teacher/classes?scope=schedule',
       { method: 'GET' },
       auth.token,
     )
@@ -2435,10 +2435,10 @@ async function copyLink() {
       </el-form-item>
       <el-form-item label="发布班级（不选 = 全体学生）">
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
-          <el-radio-group v-model="classScope" size="small">
-            <el-radio-button label="mine">我的课表班级</el-radio-button>
-            <el-radio-button label="all">全部班级</el-radio-button>
-          </el-radio-group>
+            <el-radio-group v-model="classScope" size="small">
+              <el-radio-button label="mine">我的绑定班级</el-radio-button>
+              <el-radio-button label="all">全部班级</el-radio-button>
+            </el-radio-group>
           <el-select
             v-model="createForm.classIds"
             multiple
@@ -2458,10 +2458,10 @@ async function copyLink() {
             />
           </el-select>
         </div>
-        <div class="meta" style="margin-top: 6px">
-          默认仅显示你课表里出现的班级；切换到“全部班级”可看到全系统班级。
-        </div>
-      </el-form-item>
+          <div class="meta" style="margin-top: 6px">
+            默认仅显示管理员为你绑定的班级；切换到“全部班级”可看到全系统班级。
+          </div>
+        </el-form-item>
       <el-form-item label="任务附件（可选）">
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
           <input type="file" multiple @change="onPickCreateTaskFiles" />
