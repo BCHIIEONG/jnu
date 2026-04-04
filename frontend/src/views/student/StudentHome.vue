@@ -12,6 +12,8 @@ type TaskVO = {
   title: string
   description?: string
   publisherName?: string
+  experimentCourseId?: number | null
+  experimentCourseTitle?: string | null
   deadlineAt?: string | null
   status?: string
   createdAt?: string
@@ -116,6 +118,8 @@ type Semester = { id: number; name: string; startDate?: string | null; endDate?:
 type TimeSlot = { id: number; code: string; name: string; startTime: string; endTime: string }
 type WeekScheduleItem = {
   id: number
+  sourceType?: 'CLASS_SCHEDULE' | 'EXPERIMENT_COURSE'
+  experimentCourseId?: number | null
   semesterId: number
   classId: number
   className: string
@@ -131,14 +135,44 @@ type WeekScheduleItem = {
   slotEndTime: string
   courseName?: string | null
 }
+type ExperimentCourseSlotVO = {
+  id: number
+  courseId: number
+  lessonDate: string
+  slotId: number
+  slotCode?: string | null
+  slotName: string
+  slotStartTime?: string | null
+  slotEndTime?: string | null
+  labRoomId: number
+  labRoomName?: string | null
+  capacity: number
+  enrolledCount: number
+  remainingCapacity: number
+}
+type StudentExperimentCourseVO = {
+  id: number
+  title: string
+  description?: string | null
+  teacherId: number
+  teacherDisplayName?: string | null
+  semesterId: number
+  semesterName?: string | null
+  status: 'OPEN' | 'CLOSED'
+  enrollDeadlineAt: string
+  enrolled: boolean
+  selectedSlotId?: number | null
+  selectedAt?: string | null
+  slots: ExperimentCourseSlotVO[]
+}
 
 const auth = useAuthStore()
 const ui = useUiStore()
 const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
-const activeTab = ref<'tasks' | 'schedule'>('tasks')
-const mobilePage = ref<'list' | 'task' | 'schedule'>('list')
+const activeTab = ref<'tasks' | 'courses' | 'schedule'>('tasks')
+const mobilePage = ref<'list' | 'task' | 'courses' | 'schedule'>('list')
 
 const tasks = ref<TaskVO[]>([])
 const loadingTasks = ref(false)
@@ -201,6 +235,10 @@ const deviceForm = ref({
 
 const semesters = ref<Semester[]>([])
 const timeSlots = ref<TimeSlot[]>([])
+const availableCourses = ref<StudentExperimentCourseVO[]>([])
+const myCourses = ref<StudentExperimentCourseVO[]>([])
+const loadingCourses = ref(false)
+const enrollingCourseId = ref<number | null>(null)
 const scheduleSemesterId = ref<number | null>(null)
 const weekStartDate = ref(getWeekStartYmd(new Date()))
 const weekItems = ref<WeekScheduleItem[]>([])
@@ -305,6 +343,41 @@ async function loadTasks() {
   }
 }
 
+async function loadExperimentCourses() {
+  loadingCourses.value = true
+  try {
+    const [available, mine] = await Promise.all([
+      apiData<StudentExperimentCourseVO[]>('/api/student/experiment-courses', { method: 'GET' }, auth.token),
+      apiData<StudentExperimentCourseVO[]>('/api/student/experiment-courses/my', { method: 'GET' }, auth.token),
+    ])
+    availableCourses.value = available
+    myCourses.value = mine
+  } catch (e: any) {
+    availableCourses.value = []
+    myCourses.value = []
+    ElMessage.error(e?.message ?? '加载实验课程失败')
+  } finally {
+    loadingCourses.value = false
+  }
+}
+
+async function enrollExperimentCourse(courseId: number, slotId: number) {
+  enrollingCourseId.value = courseId
+  try {
+    await apiData(
+      `/api/student/experiment-courses/${courseId}/enroll`,
+      { method: 'POST', body: { slotId } },
+      auth.token,
+    )
+    ElMessage.success('选课成功')
+    await Promise.all([loadExperimentCourses(), loadTasks(), loadWeek()])
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '选课失败')
+  } finally {
+    enrollingCourseId.value = null
+  }
+}
+
 async function loadScheduleMeta() {
   try {
     const [semesterList, slotList] = await Promise.all([
@@ -372,6 +445,11 @@ async function openScheduleMobile() {
     await loadScheduleMeta()
   }
   await loadWeek()
+}
+
+async function openCoursesMobile() {
+  mobilePage.value = 'courses'
+  await loadExperimentCourses()
 }
 
 function backToListMobile() {
@@ -902,6 +980,10 @@ function logout() {
 watch(
   () => activeTab.value,
   async (tab) => {
+    if (tab === 'courses') {
+      await loadExperimentCourses()
+      return
+    }
     if (tab !== 'schedule') return
     if (!semesters.value.length || !timeSlots.value.length) {
       await loadScheduleMeta()
@@ -920,6 +1002,7 @@ watch(
 
 onMounted(async () => {
   await loadTasks()
+  await loadExperimentCourses()
   await loadScheduleMeta()
 })
 </script>
@@ -939,7 +1022,10 @@ onMounted(async () => {
       <div v-if="mobilePage === 'list'">
         <div class="mobileTitleRow">
           <div class="mobileTitle">实验任务</div>
-          <el-button size="small" @click="openScheduleMobile">我的课表</el-button>
+          <div style="display: flex; gap: 8px">
+            <el-button size="small" @click="openCoursesMobile">实验课程</el-button>
+            <el-button size="small" @click="openScheduleMobile">我的课表</el-button>
+          </div>
         </div>
         <el-card
           v-for="t in tasks"
@@ -1164,6 +1250,68 @@ onMounted(async () => {
               <div v-else-if="mySubmissions.length === 0" class="meta">暂无提交</div>
             </el-collapse-item>
           </el-collapse>
+      </div>
+
+      <div v-else-if="mobilePage === 'courses'">
+        <div class="mobileTop">
+          <el-button size="small" @click="backToListMobile">返回任务列表</el-button>
+          <el-button size="small" :loading="loadingCourses" @click="loadExperimentCourses">刷新课程</el-button>
+        </div>
+        <el-card class="block" shadow="never">
+          <template #header><div>可选课程</div></template>
+          <div v-if="loadingCourses" class="meta">加载中...</div>
+          <div v-else-if="availableCourses.length === 0" class="meta">暂无可选实验课程</div>
+          <el-card v-else v-for="course in availableCourses" :key="course.id" shadow="never" class="subCard">
+            <div class="taskRow">
+              <div class="taskName">{{ course.title }}</div>
+              <el-tag size="small" :type="course.enrolled ? 'success' : course.status === 'OPEN' ? 'warning' : 'info'">
+                {{ course.enrolled ? '已选' : course.status }}
+              </el-tag>
+            </div>
+            <div class="meta" style="margin-top: 6px">教师：{{ course.teacherDisplayName || '-' }}</div>
+            <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
+            <div class="meta" v-if="course.description">{{ course.description }}</div>
+            <div class="progressAtts" style="margin-top: 10px">
+              <div v-for="slot in course.slots" :key="slot.id" class="progressAtt">
+                <div class="attName">{{ slot.lessonDate }} {{ slot.slotName }}</div>
+                <div class="meta">{{ slot.labRoomName || '-' }}</div>
+                <div class="meta">剩余名额：{{ slot.remainingCapacity }}</div>
+                <el-button
+                  size="small"
+                  type="primary"
+                  style="margin-top: 8px"
+                  :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN'"
+                  :loading="enrollingCourseId === course.id"
+                  @click="enrollExperimentCourse(course.id, slot.id)"
+                >
+                  {{ course.selectedSlotId === slot.id ? '已选本场次' : '选择该场次' }}
+                </el-button>
+              </div>
+            </div>
+          </el-card>
+        </el-card>
+
+        <el-card class="block" shadow="never">
+          <template #header><div>我的已选课程</div></template>
+          <div v-if="loadingCourses" class="meta">加载中...</div>
+          <div v-else-if="myCourses.length === 0" class="meta">暂无已选实验课程</div>
+          <el-card v-else v-for="course in myCourses" :key="course.id" shadow="never" class="subCard">
+            <div class="taskRow">
+              <div class="taskName">{{ course.title }}</div>
+              <el-tag size="small" type="success">已选</el-tag>
+            </div>
+            <div class="meta" style="margin-top: 6px">教师：{{ course.teacherDisplayName || '-' }}</div>
+            <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
+            <div
+              v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)"
+              :key="slot.id"
+              class="meta"
+              style="margin-top: 6px"
+            >
+              已选场次：{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}
+            </div>
+          </el-card>
+        </el-card>
       </div>
 
       <div v-else>
@@ -1453,6 +1601,62 @@ onMounted(async () => {
             </el-card>
           </el-tab-pane>
 
+          <el-tab-pane label="实验课程" name="courses">
+            <el-card class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>可选课程</div>
+                  <el-button size="small" :loading="loadingCourses" @click="loadExperimentCourses">刷新</el-button>
+                </div>
+              </template>
+              <div v-if="loadingCourses" class="meta">加载中...</div>
+              <div v-else-if="availableCourses.length === 0" class="meta">暂无可选实验课程</div>
+              <div v-else class="deviceGrid">
+                <div v-for="course in availableCourses" :key="course.id" class="deviceBox">
+                  <div class="progressTitle">{{ course.title }}</div>
+                  <div class="meta">教师：{{ course.teacherDisplayName || '-' }}</div>
+                  <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
+                  <div class="meta" v-if="course.description">{{ course.description }}</div>
+                  <div v-for="slot in course.slots" :key="slot.id" class="progressAtt" style="margin-top: 10px">
+                    <div class="attName">{{ slot.lessonDate }} {{ slot.slotName }}</div>
+                    <div class="meta">{{ slot.labRoomName || '-' }}</div>
+                    <div class="meta">剩余名额：{{ slot.remainingCapacity }}</div>
+                    <el-button
+                      size="small"
+                      type="primary"
+                      style="margin-top: 8px"
+                      :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN'"
+                      :loading="enrollingCourseId === course.id"
+                      @click="enrollExperimentCourse(course.id, slot.id)"
+                    >
+                      {{ course.selectedSlotId === slot.id ? '已选本场次' : '选择该场次' }}
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </el-card>
+
+            <el-card class="block" shadow="never">
+              <template #header><div>我的已选课程</div></template>
+              <div v-if="loadingCourses" class="meta">加载中...</div>
+              <div v-else-if="myCourses.length === 0" class="meta">暂无已选实验课程</div>
+              <div v-else class="deviceGrid">
+                <div v-for="course in myCourses" :key="course.id" class="deviceBox">
+                  <div class="progressTitle">{{ course.title }}</div>
+                  <div class="meta">教师：{{ course.teacherDisplayName || '-' }}</div>
+                  <div
+                    v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)"
+                    :key="slot.id"
+                    class="meta"
+                    style="margin-top: 6px"
+                  >
+                    场次：{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}
+                  </div>
+                </div>
+              </div>
+            </el-card>
+          </el-tab-pane>
+
           <el-tab-pane label="我的课表" name="schedule">
             <el-card class="block" shadow="never">
               <div class="toolbar">
@@ -1490,6 +1694,7 @@ onMounted(async () => {
                             <div class="meta">{{ itemAt(ts.id, d.date)!.teacherDisplayName || '-' }}</div>
                             <div class="meta">{{ itemAt(ts.id, d.date)!.labRoomName || '-' }}</div>
                             <div class="meta">{{ itemAt(ts.id, d.date)!.className }}</div>
+                            <div class="meta">{{ itemAt(ts.id, d.date)!.sourceType === 'EXPERIMENT_COURSE' ? '实验课程' : '班级课表' }}</div>
                           </template>
                           <template v-else>
                             <div class="meta">-</div>

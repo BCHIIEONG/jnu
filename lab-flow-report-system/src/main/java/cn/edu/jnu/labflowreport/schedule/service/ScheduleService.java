@@ -4,6 +4,8 @@ import cn.edu.jnu.labflowreport.admin.service.AdminAuditService;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.elective.vo.StudentEnrollmentRowVO;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseEnrollmentMapper;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
@@ -26,6 +28,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
@@ -41,6 +45,7 @@ public class ScheduleService {
     private final OrgClassMapper orgClassMapper;
     private final SysUserMapper sysUserMapper;
     private final LabRoomMapper labRoomMapper;
+    private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
     private final AdminAuditService adminAuditService;
 
     public ScheduleService(
@@ -50,6 +55,7 @@ public class ScheduleService {
             OrgClassMapper orgClassMapper,
             SysUserMapper sysUserMapper,
             LabRoomMapper labRoomMapper,
+            ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
             AdminAuditService adminAuditService
     ) {
         this.timeSlotMapper = timeSlotMapper;
@@ -58,6 +64,7 @@ public class ScheduleService {
         this.orgClassMapper = orgClassMapper;
         this.sysUserMapper = sysUserMapper;
         this.labRoomMapper = labRoomMapper;
+        this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
         this.adminAuditService = adminAuditService;
     }
 
@@ -235,7 +242,39 @@ public class ScheduleService {
         }
         LocalDate from = weekStartDate;
         LocalDate to = weekStartDate.plusDays(6);
-        return courseScheduleMapper.findSchedules(semesterId, from, to, null, user.getClassId());
+        List<CourseScheduleVO> merged = new ArrayList<>(courseScheduleMapper.findSchedules(semesterId, from, to, null, user.getClassId()));
+        experimentCourseEnrollmentMapper.findActiveRowsByStudentId(userId).stream()
+                .filter(row -> semesterId == null || semesterId.equals(row.semesterId()))
+                .filter(row -> !row.lessonDate().isBefore(from) && !row.lessonDate().isAfter(to))
+                .map(this::toExperimentCourseSchedule)
+                .forEach(merged::add);
+        merged.sort(Comparator
+                .comparing(CourseScheduleVO::getLessonDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(CourseScheduleVO::getSlotStartTime, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(CourseScheduleVO::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+        return merged;
+    }
+
+    private CourseScheduleVO toExperimentCourseSchedule(StudentEnrollmentRowVO row) {
+        CourseScheduleVO vo = new CourseScheduleVO();
+        vo.setId(row.enrollmentId());
+        vo.setSourceType("EXPERIMENT_COURSE");
+        vo.setExperimentCourseId(row.courseId());
+        vo.setSemesterId(row.semesterId());
+        vo.setClassId(null);
+        vo.setClassName("实验课程");
+        vo.setTeacherId(row.teacherId());
+        vo.setTeacherDisplayName(row.teacherDisplayName());
+        vo.setLabRoomId(row.labRoomId());
+        vo.setLabRoomName(row.labRoomName());
+        vo.setLessonDate(row.lessonDate());
+        vo.setSlotId(row.slotId());
+        vo.setSlotCode(row.slotCode());
+        vo.setSlotName(row.slotName());
+        vo.setSlotStartTime(row.slotStartTime());
+        vo.setSlotEndTime(row.slotEndTime());
+        vo.setCourseName(row.courseTitle());
+        return vo;
     }
 
     private void createCourseSchedulePrecheck(AdminCourseScheduleRequest request) {

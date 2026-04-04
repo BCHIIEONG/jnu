@@ -16,11 +16,14 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    t.description,
                    t.publisher_id,
                    u.display_name AS publisher_name,
+                   t.experiment_course_id,
+                   ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
                    t.created_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
+            LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
             ORDER BY t.created_at DESC
             """)
     List<TaskVO> findTaskList();
@@ -31,11 +34,14 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    t.description,
                    t.publisher_id,
                    u.display_name AS publisher_name,
+                   t.experiment_course_id,
+                   ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
                    t.created_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
+            LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
             WHERE t.publisher_id = #{publisherId}
             ORDER BY t.created_at DESC
             """)
@@ -47,13 +53,19 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    t.description,
                    t.publisher_id,
                    u.display_name AS publisher_name,
+                   t.experiment_course_id,
+                   ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
                    t.created_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
+            LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
             WHERE (
-                NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
+                (
+                    NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
+                    AND t.experiment_course_id IS NULL
+                )
                 OR EXISTS (
                     SELECT 1
                     FROM exp_task_target_class tc
@@ -61,6 +73,13 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                     WHERE tc.task_id = t.id
                       AND su.class_id IS NOT NULL
                       AND tc.class_id = su.class_id
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM experiment_course_enrollment e
+                    WHERE e.course_id = t.experiment_course_id
+                      AND e.student_id = #{studentId}
+                      AND e.status = 'ENROLLED'
                 )
             )
             ORDER BY t.created_at DESC
@@ -73,15 +92,46 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    t.description,
                    t.publisher_id,
                    u.display_name AS publisher_name,
+                   t.experiment_course_id,
+                   ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
                    t.created_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
+            LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
             WHERE t.id = #{taskId}
             """)
     TaskVO findTaskById(Long taskId);
 
     @Select("SELECT publisher_id FROM exp_task WHERE id = #{taskId}")
     Long findPublisherId(Long taskId);
+
+    @Select("""
+            SELECT COUNT(*)
+            FROM exp_task t
+            JOIN sys_user su ON su.id = #{studentId}
+            WHERE t.id = #{taskId}
+              AND (
+                  (
+                      NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
+                      AND t.experiment_course_id IS NULL
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM exp_task_target_class tc
+                      WHERE tc.task_id = t.id
+                        AND su.class_id IS NOT NULL
+                        AND tc.class_id = su.class_id
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM experiment_course_enrollment e
+                      WHERE e.course_id = t.experiment_course_id
+                        AND e.student_id = #{studentId}
+                        AND e.status = 'ENROLLED'
+                  )
+              )
+            """)
+    Integer countStudentAccessibleTask(Long taskId, Long studentId);
 }

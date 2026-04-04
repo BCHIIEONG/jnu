@@ -557,9 +557,9 @@ public class ExperimentFlowService {
 
     private void ensureStudentCanAccessTask(Long taskId, AuthenticatedUser student) {
         requireTask(taskId);
-        SysUserEntity user = requireStudentUser(student.userId());
-        Set<Long> targetClassIds = loadTargetClassIds(taskId);
-        if (!targetClassIds.isEmpty() && (user.getClassId() == null || !targetClassIds.contains(user.getClassId()))) {
+        requireStudentUser(student.userId());
+        Integer accessible = expTaskMapper.countStudentAccessibleTask(taskId, student.userId());
+        if (accessible == null || accessible <= 0) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权访问该任务");
         }
     }

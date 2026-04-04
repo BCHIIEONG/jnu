@@ -14,6 +14,8 @@ type TaskVO = {
   title: string
   description?: string
   publisherName?: string
+  experimentCourseId?: number | null
+  experimentCourseTitle?: string | null
   deadlineAt?: string | null
   status?: string
   createdAt?: string
@@ -53,6 +55,8 @@ type Semester = { id: number; name: string; startDate?: string | null; endDate?:
 type TimeSlot = { id: number; code: string; name: string; startTime: string; endTime: string }
 type WeekScheduleItem = {
   id: number
+  sourceType?: 'CLASS_SCHEDULE' | 'EXPERIMENT_COURSE'
+  experimentCourseId?: number | null
   semesterId: number
   classId: number
   className: string
@@ -84,6 +88,64 @@ type AttendanceRecord = {
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
 type AttendanceStaticCodeVO = { code: string }
 type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
+type MetaOptionVO = { id: number; name: string }
+type ExperimentCourseSlotVO = {
+  id: number
+  courseId: number
+  lessonDate: string
+  slotId: number
+  slotCode?: string | null
+  slotName: string
+  slotStartTime?: string | null
+  slotEndTime?: string | null
+  labRoomId: number
+  labRoomName?: string | null
+  capacity: number
+  enrolledCount: number
+  remainingCapacity: number
+}
+type ExperimentCourseVO = {
+  id: number
+  title: string
+  description?: string | null
+  teacherId: number
+  teacherDisplayName?: string | null
+  semesterId: number
+  semesterName?: string | null
+  status: 'OPEN' | 'CLOSED'
+  enrollDeadlineAt: string
+  targetClassIds: number[]
+  targetStudentIds: number[]
+  slots: ExperimentCourseSlotVO[]
+  totalEnrolled?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+type ExperimentCourseEnrollmentRowVO = {
+  slotId: number
+  lessonDate: string
+  slotName?: string | null
+  slotStartTime?: string | null
+  slotEndTime?: string | null
+  labRoomName?: string | null
+  capacity?: number | null
+  enrolledCount?: number | null
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  selectedAt: string
+}
+type ExperimentCourseStudentOptionVO = {
+  id: number
+  username: string
+  displayName: string
+  classDisplayName?: string | null
+}
+type ExperimentCourseMetaVO = {
+  semesters: MetaOptionVO[]
+  timeSlots: MetaOptionVO[]
+  labRooms: MetaOptionVO[]
+}
 type PageResult<T> = { page: number; size: number; total: number; items: T[] }
 type AttendanceHistoryItem = {
   sessionId: number
@@ -195,7 +257,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'flow' | 'report' | 'schedule' | 'history'>('flow')
+const activeTab = ref<'course' | 'flow' | 'report' | 'schedule' | 'history'>('course')
 const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
@@ -222,6 +284,7 @@ const createForm = reactive({
   title: '',
   description: '',
   deadlineAt: null as string | null,
+  experimentCourseId: null as number | null,
   classIds: [] as number[],
 })
 const editTaskForm = reactive({
@@ -234,6 +297,31 @@ const updatingTaskTitle = ref(false)
 const classScope = ref<'mine' | 'all'>('mine')
 const classOptions = ref<TeacherClassVO[]>([])
 const loadingClasses = ref(false)
+const experimentCourseClassOptions = ref<TeacherClassVO[]>([])
+const loadingExperimentCourseClasses = ref(false)
+const experimentCourses = ref<ExperimentCourseVO[]>([])
+const loadingExperimentCourses = ref(false)
+const selectedExperimentCourseId = ref<number | null>(null)
+const experimentCourseDetail = computed(() => experimentCourses.value.find((item) => item.id === selectedExperimentCourseId.value) ?? null)
+const experimentCourseDialog = ref(false)
+const editingExperimentCourseId = ref<number | null>(null)
+const savingExperimentCourse = ref(false)
+const experimentCourseMeta = ref<ExperimentCourseMetaVO>({ semesters: [], timeSlots: [], labRooms: [] })
+const experimentCourseStudentOptions = ref<ExperimentCourseStudentOptionVO[]>([])
+const loadingExperimentCourseStudents = ref(false)
+const loadingExperimentCourseMeta = ref(false)
+const togglingExperimentCourseId = ref<number | null>(null)
+const loadingCourseEnrollments = ref(false)
+const experimentCourseEnrollments = ref<ExperimentCourseEnrollmentRowVO[]>([])
+const experimentCourseForm = reactive({
+  title: '',
+  description: '',
+  semesterId: null as number | null,
+  enrollDeadlineAt: null as string | null,
+  targetClassIds: [] as number[],
+  targetStudentIds: [] as number[],
+  slots: [{ lessonDate: '', slotId: null as number | null, labRoomId: null as number | null, capacity: 1 }],
+})
 const historyClassOptions = ref<TeacherClassVO[]>([])
 const loadingHistoryClasses = ref(false)
 
@@ -894,6 +982,7 @@ async function createTask() {
           title: createForm.title,
           description: createForm.description,
           deadlineAt: createForm.deadlineAt,
+          experimentCourseId: createForm.experimentCourseId,
           classIds: createForm.classIds,
         },
       },
@@ -909,6 +998,7 @@ async function createTask() {
     createForm.title = ''
     createForm.description = ''
     createForm.deadlineAt = null
+    createForm.experimentCourseId = null
     createForm.classIds = []
     createTaskFiles.value = []
     if (createTaskFileInput.value) createTaskFileInput.value.value = ''
@@ -1046,6 +1136,226 @@ async function loadClassOptions() {
   }
 }
 
+async function loadExperimentCourseClassOptions() {
+  loadingExperimentCourseClasses.value = true
+  try {
+    experimentCourseClassOptions.value = await apiData<TeacherClassVO[]>(
+      '/api/teacher/classes?scope=all',
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    experimentCourseClassOptions.value = []
+    ElMessage.error(e?.message ?? '加载实验课程班级失败')
+  } finally {
+    loadingExperimentCourseClasses.value = false
+  }
+}
+
+async function loadExperimentCourseMeta() {
+  loadingExperimentCourseMeta.value = true
+  try {
+    experimentCourseMeta.value = await apiData<ExperimentCourseMetaVO>(
+      '/api/teacher/experiment-courses/meta',
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加载实验课程元数据失败')
+  } finally {
+    loadingExperimentCourseMeta.value = false
+  }
+}
+
+async function searchExperimentCourseStudents(query = '') {
+  loadingExperimentCourseStudents.value = true
+  try {
+    experimentCourseStudentOptions.value = await apiData<ExperimentCourseStudentOptionVO[]>(
+      `/api/teacher/experiment-courses/student-options?q=${encodeURIComponent(query)}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    experimentCourseStudentOptions.value = []
+    ElMessage.error(e?.message ?? '加载学生选项失败')
+  } finally {
+    loadingExperimentCourseStudents.value = false
+  }
+}
+
+function resetExperimentCourseForm() {
+  editingExperimentCourseId.value = null
+  experimentCourseForm.title = ''
+  experimentCourseForm.description = ''
+  experimentCourseForm.semesterId = experimentCourseMeta.value.semesters[0]?.id ?? null
+  experimentCourseForm.enrollDeadlineAt = null
+  experimentCourseForm.targetClassIds = []
+  experimentCourseForm.targetStudentIds = []
+  experimentCourseForm.slots = [{ lessonDate: '', slotId: null, labRoomId: null, capacity: 1 }]
+}
+
+function fillExperimentCourseForm(course: ExperimentCourseVO) {
+  editingExperimentCourseId.value = course.id
+  experimentCourseForm.title = course.title
+  experimentCourseForm.description = course.description ?? ''
+  experimentCourseForm.semesterId = course.semesterId
+  experimentCourseForm.enrollDeadlineAt = course.enrollDeadlineAt
+  experimentCourseForm.targetClassIds = [...(course.targetClassIds || [])]
+  experimentCourseForm.targetStudentIds = [...(course.targetStudentIds || [])]
+  experimentCourseForm.slots = (course.slots || []).map((slot) => ({
+    lessonDate: slot.lessonDate,
+    slotId: slot.slotId,
+    labRoomId: slot.labRoomId,
+    capacity: slot.capacity,
+  }))
+}
+
+async function openCreateExperimentCourseDialog() {
+  if (!experimentCourseMeta.value.semesters.length) await loadExperimentCourseMeta()
+  if (!experimentCourseClassOptions.value.length) await loadExperimentCourseClassOptions()
+  await searchExperimentCourseStudents()
+  resetExperimentCourseForm()
+  experimentCourseDialog.value = true
+}
+
+async function openEditExperimentCourseDialog(course: ExperimentCourseVO) {
+  if (!experimentCourseMeta.value.semesters.length) await loadExperimentCourseMeta()
+  if (!experimentCourseClassOptions.value.length) await loadExperimentCourseClassOptions()
+  await searchExperimentCourseStudents()
+  fillExperimentCourseForm(course)
+  experimentCourseDialog.value = true
+}
+
+function addExperimentCourseSlot() {
+  experimentCourseForm.slots.push({ lessonDate: '', slotId: null, labRoomId: null, capacity: 1 })
+}
+
+function removeExperimentCourseSlot(index: number) {
+  if (experimentCourseForm.slots.length <= 1) {
+    ElMessage.warning('至少保留一个场次')
+    return
+  }
+  experimentCourseForm.slots.splice(index, 1)
+}
+
+async function loadExperimentCourses(selectId?: number | null) {
+  loadingExperimentCourses.value = true
+  try {
+    experimentCourses.value = await apiData<ExperimentCourseVO[]>(
+      '/api/teacher/experiment-courses',
+      { method: 'GET' },
+      auth.token,
+    )
+    const preferredId = selectId ?? selectedExperimentCourseId.value
+    if (preferredId && experimentCourses.value.find((item) => item.id === preferredId)) {
+      selectedExperimentCourseId.value = preferredId
+    } else {
+      selectedExperimentCourseId.value = experimentCourses.value[0]?.id ?? null
+    }
+    await loadExperimentCourseEnrollments()
+  } catch (e: any) {
+    experimentCourses.value = []
+    selectedExperimentCourseId.value = null
+    experimentCourseEnrollments.value = []
+    ElMessage.error(e?.message ?? '加载实验课程失败')
+  } finally {
+    loadingExperimentCourses.value = false
+  }
+}
+
+async function loadExperimentCourseEnrollments() {
+  if (!selectedExperimentCourseId.value) {
+    experimentCourseEnrollments.value = []
+    return
+  }
+  loadingCourseEnrollments.value = true
+  try {
+    experimentCourseEnrollments.value = await apiData<ExperimentCourseEnrollmentRowVO[]>(
+      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/enrollments`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    experimentCourseEnrollments.value = []
+    ElMessage.error(e?.message ?? '加载选课名单失败')
+  } finally {
+    loadingCourseEnrollments.value = false
+  }
+}
+
+async function saveExperimentCourse() {
+  if (!experimentCourseForm.title.trim()) {
+    ElMessage.warning('请输入课程标题')
+    return
+  }
+  if (!experimentCourseForm.semesterId) {
+    ElMessage.warning('请选择学期')
+    return
+  }
+  if (!experimentCourseForm.enrollDeadlineAt) {
+    ElMessage.warning('请选择截止选课时间')
+    return
+  }
+  if (experimentCourseForm.slots.some((slot) => !slot.lessonDate || !slot.slotId || !slot.labRoomId || !slot.capacity || slot.capacity < 1)) {
+    ElMessage.warning('请完整填写所有场次')
+    return
+  }
+  savingExperimentCourse.value = true
+  try {
+    const body = {
+      title: experimentCourseForm.title,
+      description: experimentCourseForm.description || null,
+      semesterId: experimentCourseForm.semesterId,
+      enrollDeadlineAt: experimentCourseForm.enrollDeadlineAt,
+      targetClassIds: experimentCourseForm.targetClassIds,
+      targetStudentIds: experimentCourseForm.targetStudentIds,
+      slots: experimentCourseForm.slots.map((slot) => ({
+        lessonDate: slot.lessonDate,
+        slotId: slot.slotId,
+        labRoomId: slot.labRoomId,
+        capacity: slot.capacity,
+      })),
+    }
+    const saved = await apiData<ExperimentCourseVO>(
+      editingExperimentCourseId.value
+        ? `/api/teacher/experiment-courses/${editingExperimentCourseId.value}`
+        : '/api/teacher/experiment-courses',
+      {
+        method: editingExperimentCourseId.value ? 'PUT' : 'POST',
+        body,
+      },
+      auth.token,
+    )
+    experimentCourseDialog.value = false
+    ElMessage.success(editingExperimentCourseId.value ? '实验课程已更新' : '实验课程已创建')
+    await loadExperimentCourses(saved.id)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '保存实验课程失败')
+  } finally {
+    savingExperimentCourse.value = false
+  }
+}
+
+async function toggleExperimentCourseStatus(course: ExperimentCourseVO) {
+  togglingExperimentCourseId.value = course.id
+  try {
+    const updated = await apiData<ExperimentCourseVO>(
+      `/api/teacher/experiment-courses/${course.id}/status`,
+      {
+        method: 'PUT',
+        body: { status: course.status === 'OPEN' ? 'CLOSED' : 'OPEN' },
+      },
+      auth.token,
+    )
+    ElMessage.success(updated.status === 'OPEN' ? '课程已开启' : '课程已关闭')
+    await loadExperimentCourses(updated.id)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '更新课程状态失败')
+  } finally {
+    togglingExperimentCourseId.value = null
+  }
+}
+
 async function loadHistoryClassOptions() {
   loadingHistoryClasses.value = true
   try {
@@ -1125,9 +1435,13 @@ watch(
   () => createDialog.value,
   async (open) => {
     if (!open) {
+      createForm.experimentCourseId = null
       createTaskFiles.value = []
       if (createTaskFileInput.value) createTaskFileInput.value.value = ''
       return
+    }
+    if (!experimentCourses.value.length) {
+      await loadExperimentCourses()
     }
     await loadClassOptions()
   },
@@ -1137,6 +1451,11 @@ watch(classScope, async () => {
   if (!createDialog.value) return
   createForm.classIds = []
   await loadClassOptions()
+})
+
+watch(selectedExperimentCourseId, async () => {
+  if (activeTab.value !== 'course') return
+  await loadExperimentCourseEnrollments()
 })
 
 function openReview(row: SubmissionVO) {
@@ -1360,9 +1679,19 @@ async function updateTaskTitle() {
   }
 }
 
-onMounted(loadTasks)
+onMounted(async () => {
+  await loadTasks()
+  await loadExperimentCourses()
+})
 
 watch(activeTab, async (tab) => {
+  if (tab === 'course') {
+    if (!experimentCourseMeta.value.semesters.length) {
+      await loadExperimentCourseMeta()
+    }
+    await loadExperimentCourses()
+    return
+  }
   if (tab === 'flow') {
     if (selectedTaskId.value) {
       await Promise.all([loadProgressStudents(), loadTaskDevices(), loadDeviceRequests()])
@@ -1797,6 +2126,96 @@ async function copyLink() {
       </el-aside>
       <el-main class="main">
         <el-tabs v-model="activeTab" class="tabs">
+          <el-tab-pane label="实验课程" name="course">
+            <el-card class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>实验课程</div>
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap">
+                    <el-button size="small" :loading="loadingExperimentCourses" @click="loadExperimentCourses()">刷新课程</el-button>
+                    <el-button type="primary" size="small" @click="openCreateExperimentCourseDialog">新建实验课程</el-button>
+                  </div>
+                </div>
+              </template>
+              <template v-if="!isMobile">
+                <el-table
+                  :data="experimentCourses"
+                  size="small"
+                  stripe
+                  v-loading="loadingExperimentCourses"
+                  @row-click="(row: ExperimentCourseVO) => { selectedExperimentCourseId = row.id }"
+                  :row-class-name="({ row }: { row: ExperimentCourseVO }) => (row.id === selectedExperimentCourseId ? 'is-active' : '')"
+                >
+                  <el-table-column prop="title" label="课程" min-width="180" />
+                  <el-table-column prop="semesterName" label="学期" min-width="140" />
+                  <el-table-column prop="status" label="状态" width="100" />
+                  <el-table-column prop="enrollDeadlineAt" label="截止选课时间" min-width="180" />
+                  <el-table-column label="场次/人数" min-width="180">
+                    <template #default="{ row }: { row: ExperimentCourseVO }">
+                      {{ row.slots.length }} 个场次 / 已选 {{ row.totalEnrolled || 0 }} 人
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="220">
+                    <template #default="{ row }: { row: ExperimentCourseVO }">
+                      <el-button size="small" @click.stop="openEditExperimentCourseDialog(row)">编辑</el-button>
+                      <el-button size="small" @click.stop="toggleExperimentCourseStatus(row)" :loading="togglingExperimentCourseId === row.id">
+                        {{ row.status === 'OPEN' ? '关闭' : '开启' }}
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+              <template v-else>
+                <div v-if="loadingExperimentCourses" class="meta">加载中...</div>
+                <div v-else-if="experimentCourses.length === 0" class="meta">暂无实验课程</div>
+                <el-card v-else v-for="course in experimentCourses" :key="course.id" shadow="never" class="stuCard">
+                  <div class="stuHead">
+                    <div>
+                      <div class="stuName">{{ course.title }}</div>
+                      <div class="meta">{{ course.semesterName || '-' }}</div>
+                    </div>
+                    <el-tag size="small" :type="course.status === 'OPEN' ? 'success' : 'info'">{{ course.status }}</el-tag>
+                  </div>
+                  <div class="meta" style="margin-top: 8px">截止：{{ course.enrollDeadlineAt }}</div>
+                  <div class="meta">场次：{{ course.slots.length }} / 已选 {{ course.totalEnrolled || 0 }} 人</div>
+                  <div class="stuActions">
+                    <el-button size="small" @click="selectedExperimentCourseId = course.id">查看名单</el-button>
+                    <el-button size="small" @click="openEditExperimentCourseDialog(course)">编辑</el-button>
+                    <el-button size="small" @click="toggleExperimentCourseStatus(course)" :loading="togglingExperimentCourseId === course.id">
+                      {{ course.status === 'OPEN' ? '关闭' : '开启' }}
+                    </el-button>
+                  </div>
+                </el-card>
+              </template>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="experimentCourseDetail">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>{{ experimentCourseDetail.title }}</div>
+                  <div class="meta">选课名单</div>
+                </div>
+              </template>
+              <div class="meta" style="margin-bottom: 8px">截止：{{ experimentCourseDetail.enrollDeadlineAt }} / 状态：{{ experimentCourseDetail.status }}</div>
+              <div class="meta" style="margin-bottom: 12px">说明：{{ experimentCourseDetail.description || '（无说明）' }}</div>
+              <div v-for="slot in experimentCourseDetail.slots" :key="slot.id" class="deviceBox" style="margin-bottom: 10px">
+                <div class="deviceTitle">{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}</div>
+                <div class="meta">容量：{{ slot.capacity }} / 已选：{{ slot.enrolledCount }} / 剩余：{{ slot.remainingCapacity }}</div>
+                <el-table
+                  :data="experimentCourseEnrollments.filter((row) => row.slotId === slot.id)"
+                  size="small"
+                  v-loading="loadingCourseEnrollments"
+                  empty-text="该场次暂无学生报名"
+                  style="margin-top: 8px"
+                >
+                  <el-table-column prop="studentDisplayName" label="学生姓名" min-width="140" />
+                  <el-table-column prop="studentUsername" label="用户名" width="140" />
+                  <el-table-column prop="selectedAt" label="选课时间" min-width="180" />
+                </el-table>
+              </div>
+            </el-card>
+          </el-tab-pane>
+
           <el-tab-pane label="实验过程管理" name="flow">
             <el-card v-if="isMobile" class="block" shadow="never">
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -2433,6 +2852,25 @@ async function copyLink() {
           value-format="YYYY-MM-DDTHH:mm:ss"
         />
       </el-form-item>
+      <el-form-item label="关联实验课程（可选）">
+        <el-select
+          v-model="createForm.experimentCourseId"
+          clearable
+          filterable
+          placeholder="选择已开的实验课程"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="course in experimentCourses.filter((item) => item.status === 'OPEN')"
+            :key="course.id"
+            :label="`${course.title}${course.semesterName ? ` / ${course.semesterName}` : ''}`"
+            :value="course.id"
+          />
+        </el-select>
+        <div class="meta" style="margin-top: 6px">
+          绑定实验课程后，当前及后续选上该课程的学生都能看到这条任务。
+        </div>
+      </el-form-item>
       <el-form-item label="发布班级（不选 = 全体学生）">
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
             <el-radio-group v-model="classScope" size="small">
@@ -2485,6 +2923,107 @@ async function copyLink() {
     <template #footer>
       <el-button @click="editTaskDialog = false">取消</el-button>
       <el-button type="primary" :loading="updatingTaskTitle" @click="updateTaskTitle">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="experimentCourseDialog"
+    :title="editingExperimentCourseId ? '编辑实验课程' : '新建实验课程'"
+    width="760px"
+  >
+    <el-form label-position="top">
+      <el-form-item label="课程标题">
+        <el-input v-model="experimentCourseForm.title" placeholder="例如：示波器基础实验" />
+      </el-form-item>
+      <el-form-item label="课程说明">
+        <el-input v-model="experimentCourseForm.description" type="textarea" :rows="4" placeholder="填写实验课程介绍或选课说明" />
+      </el-form-item>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+        <el-form-item label="学期">
+          <el-select v-model="experimentCourseForm.semesterId" placeholder="选择学期" style="width: 100%">
+            <el-option v-for="item in experimentCourseMeta.semesters" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="截止选课时间">
+          <el-date-picker
+            v-model="experimentCourseForm.enrollDeadlineAt"
+            type="datetime"
+            style="width: 100%"
+            format="YYYY-MM-DD HH:mm:ss"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+          />
+        </el-form-item>
+      </div>
+      <el-form-item label="开放班级（并集）">
+        <el-select
+          v-model="experimentCourseForm.targetClassIds"
+          multiple
+          filterable
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          :loading="loadingExperimentCourseClasses"
+          placeholder="选择开放班级"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="c in experimentCourseClassOptions"
+            :key="c.id"
+            :label="c.departmentName ? `${c.departmentName} / ${c.name}` : c.name"
+            :value="c.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="指定学生（并集）">
+        <el-select
+          v-model="experimentCourseForm.targetStudentIds"
+          multiple
+          filterable
+          remote
+          reserve-keyword
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          :remote-method="searchExperimentCourseStudents"
+          :loading="loadingExperimentCourseStudents"
+          placeholder="搜索学生姓名/用户名"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="student in experimentCourseStudentOptions"
+            :key="student.id"
+            :label="`${student.displayName} / ${student.username}${student.classDisplayName ? ` / ${student.classDisplayName}` : ''}`"
+            :value="student.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="可选场次">
+        <div style="display: flex; flex-direction: column; gap: 10px; width: 100%">
+          <div v-for="(slot, index) in experimentCourseForm.slots" :key="index" class="deviceBox">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px">
+              <div class="deviceTitle">场次 {{ index + 1 }}</div>
+              <el-button size="small" type="danger" plain @click="removeExperimentCourseSlot(index)">删除场次</el-button>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+              <el-date-picker v-model="slot.lessonDate" type="date" value-format="YYYY-MM-DD" placeholder="日期" style="width: 100%" />
+              <el-select v-model="slot.slotId" placeholder="节次" style="width: 100%">
+                <el-option v-for="item in experimentCourseMeta.timeSlots" :key="item.id" :label="item.name" :value="item.id" />
+              </el-select>
+              <el-select v-model="slot.labRoomId" placeholder="地点" style="width: 100%">
+                <el-option v-for="item in experimentCourseMeta.labRooms" :key="item.id" :label="item.name" :value="item.id" />
+              </el-select>
+              <el-input-number v-model="slot.capacity" :min="1" :max="999" style="width: 100%" />
+            </div>
+          </div>
+          <div>
+            <el-button size="small" @click="addExperimentCourseSlot">新增场次</el-button>
+          </div>
+        </div>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="experimentCourseDialog = false">取消</el-button>
+      <el-button type="primary" :loading="savingExperimentCourse" @click="saveExperimentCourse">保存</el-button>
     </template>
   </el-dialog>
 

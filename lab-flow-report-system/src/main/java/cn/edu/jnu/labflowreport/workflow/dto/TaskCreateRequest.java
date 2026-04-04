@@ -9,6 +9,7 @@ public record TaskCreateRequest(
         String title,
         String description,
         LocalDateTime deadlineAt,
-        List<Long> classIds
+        List<Long> classIds,
+        Long experimentCourseId
 ) {
 }

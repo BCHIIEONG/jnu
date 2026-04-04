@@ -11,6 +11,8 @@ public class TaskVO {
     private String description;
     private Long publisherId;
     private String publisherName;
+    private Long experimentCourseId;
+    private String experimentCourseTitle;
     private LocalDateTime deadlineAt;
     private String status;
     private LocalDateTime createdAt;

@@ -17,6 +17,8 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
     @Select("""
             <script>
             SELECT cs.id,
+                   'CLASS_SCHEDULE' AS source_type,
+                   NULL AS experiment_course_id,
                    cs.semester_id,
                    cs.class_id,
                    CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,
@@ -55,6 +57,8 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
 
     @Select("""
             SELECT cs.id,
+                   'CLASS_SCHEDULE' AS source_type,
+                   NULL AS experiment_course_id,
                    cs.semester_id,
                    cs.class_id,
                    CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,
@@ -89,6 +93,8 @@ public interface CourseScheduleMapper extends BaseMapper<CourseScheduleEntity> {
 
     @Select("""
             SELECT cs.id,
+                   'CLASS_SCHEDULE' AS source_type,
+                   NULL AS experiment_course_id,
                    cs.semester_id,
                    cs.class_id,
                    CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_name,

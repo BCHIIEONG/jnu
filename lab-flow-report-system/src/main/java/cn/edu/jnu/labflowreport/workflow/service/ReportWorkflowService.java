@@ -5,6 +5,7 @@ import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.HashUtils;
+import cn.edu.jnu.labflowreport.elective.service.ExperimentCourseService;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskTargetClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExportRecordEntity;
@@ -77,6 +78,7 @@ public class ReportWorkflowService {
     private final PlagTaskRunMapper plagTaskRunMapper;
     private final PlagArtifactFpMapper plagArtifactFpMapper;
     private final PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper;
+    private final ExperimentCourseService experimentCourseService;
 
     public ReportWorkflowService(
             ExpTaskMapper expTaskMapper,
@@ -95,7 +97,8 @@ public class ReportWorkflowService {
             TaskDeviceRequestMapper taskDeviceRequestMapper,
             PlagTaskRunMapper plagTaskRunMapper,
             PlagArtifactFpMapper plagArtifactFpMapper,
-            PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper
+            PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper,
+            ExperimentCourseService experimentCourseService
     ) {
         this.expTaskMapper = expTaskMapper;
         this.submissionMapper = submissionMapper;
@@ -114,6 +117,7 @@ public class ReportWorkflowService {
         this.plagTaskRunMapper = plagTaskRunMapper;
         this.plagArtifactFpMapper = plagArtifactFpMapper;
         this.plagSubmissionBestMatchMapper = plagSubmissionBestMatchMapper;
+        this.experimentCourseService = experimentCourseService;
     }
 
     @Transactional
@@ -122,10 +126,12 @@ public class ReportWorkflowService {
         entity.setTitle(request.title());
         entity.setDescription(request.description());
         entity.setPublisherId(user.userId());
+        entity.setExperimentCourseId(request.experimentCourseId());
         entity.setDeadlineAt(request.deadlineAt());
         entity.setStatus("OPEN");
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
+        validateExperimentCourseBinding(user, request.experimentCourseId());
         expTaskMapper.insert(entity);
 
         if (request.classIds() != null && !request.classIds().isEmpty()) {
@@ -580,15 +586,12 @@ public class ReportWorkflowService {
         if (taskId == null || studentId == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "参数错误");
         }
-        List<Long> targets = taskTargetClassMapper.findTargetClassIds(taskId);
-        if (targets.isEmpty()) {
-            return; // global task
-        }
         SysUserEntity me = sysUserMapper.selectById(studentId);
         if (me == null) {
             throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
         }
-        if (me.getClassId() == null || !targets.contains(me.getClassId())) {
+        Integer accessible = expTaskMapper.countStudentAccessibleTask(taskId, studentId);
+        if (accessible == null || accessible <= 0) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该任务的发布班级");
         }
     }
@@ -683,6 +686,17 @@ public class ReportWorkflowService {
         return taskAttachmentMapper.findByTaskId(taskId).stream()
                 .map(this::toTaskAttachmentVo)
                 .toList();
+    }
+
+    private void validateExperimentCourseBinding(AuthenticatedUser actor, Long experimentCourseId) {
+        if (experimentCourseId == null) {
+            return;
+        }
+        experimentCourseService.listTeacherCourses(actor).stream()
+                .filter(course -> Objects.equals(course.getId(), experimentCourseId))
+                .filter(course -> "OPEN".equalsIgnoreCase(course.getStatus()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "只能绑定自己创建且已开放的实验课程"));
     }
 
     private TaskAttachmentVO toTaskAttachmentVo(TaskAttachmentEntity entity) {

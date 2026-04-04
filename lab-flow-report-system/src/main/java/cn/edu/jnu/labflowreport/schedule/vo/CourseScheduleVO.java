@@ -7,6 +7,8 @@ import lombok.Data;
 @Data
 public class CourseScheduleVO {
     private Long id;
+    private String sourceType;
+    private Long experimentCourseId;
     private Long semesterId;
     private Long classId;
     private String className;
@@ -22,4 +24,3 @@ public class CourseScheduleVO {
     private LocalTime slotEndTime;
     private String courseName;
 }
-

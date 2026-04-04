@@ -7,17 +7,17 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("exp_task")
-public class ExpTaskEntity {
+@TableName("experiment_course")
+public class ExperimentCourseEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private String title;
     private String description;
-    private Long publisherId;
-    private Long experimentCourseId;
-    private LocalDateTime deadlineAt;
+    private Long teacherId;
+    private Long semesterId;
     private String status;
+    private LocalDateTime enrollDeadlineAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
