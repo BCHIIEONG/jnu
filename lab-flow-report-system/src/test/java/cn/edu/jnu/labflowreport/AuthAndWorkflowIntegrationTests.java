@@ -40,8 +40,28 @@ class AuthAndWorkflowIntegrationTests {
         mockMvc.perform(get("/api/auth/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.user.username").value("teacher"));
+    }
+
+    @Test
+    void unauthenticatedMeShouldReturnJson401() throws Exception {
+        mockMvc.perform(get("/api/auth/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value(40100))
+                .andExpect(jsonPath("$.message").value("未登录或登录已失效"));
+    }
+
+    @Test
+    void invalidTokenShouldReturnJson401() throws Exception {
+        mockMvc.perform(get("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value(40100))
+                .andExpect(jsonPath("$.message").value("未登录或登录已失效"));
     }
 
     @Test
@@ -54,6 +74,7 @@ class AuthAndWorkflowIntegrationTests {
                                 {"title":"forbidden task","description":"x"}
                                 """))
                 .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.code").value(40300));
     }
 

@@ -1,6 +1,9 @@
+
 package cn.edu.jnu.labflowreport.elective.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
+import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceSessionMapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
@@ -8,6 +11,7 @@ import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseEnrollRequest;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseSaveRequest;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseEnrollmentRowVO;
+import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseSlotInstanceRowVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseSlotRowVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseStudentOptionVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseSummaryRowVO;
@@ -17,6 +21,7 @@ import cn.edu.jnu.labflowreport.elective.vo.StudentExperimentCourseVO;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEnrollmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotInstanceEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseTargetClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseTargetStudentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
@@ -25,6 +30,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseEnrollmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotInstanceMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseTargetClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseTargetStudentMapper;
@@ -33,10 +39,14 @@ import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SemesterMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.schedule.mapper.TimeSlotMapper;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -51,11 +61,17 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ExperimentCourseService {
 
+    private static final Set<String> SLOT_MODES = Set.of("SINGLE", "RECURRING");
+    private static final Set<String> REPEAT_PATTERNS = Set.of("EVERY_WEEK", "ODD_WEEK");
+    private static final Set<String> RANGE_MODES = Set.of("SEMESTER", "DATE_RANGE");
+
     private final ExperimentCourseMapper experimentCourseMapper;
     private final ExperimentCourseSlotMapper experimentCourseSlotMapper;
+    private final ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper;
     private final ExperimentCourseTargetClassMapper experimentCourseTargetClassMapper;
     private final ExperimentCourseTargetStudentMapper experimentCourseTargetStudentMapper;
     private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
+    private final AttendanceSessionMapper attendanceSessionMapper;
     private final SemesterMapper semesterMapper;
     private final OrgClassMapper orgClassMapper;
     private final SysUserMapper sysUserMapper;
@@ -65,9 +81,11 @@ public class ExperimentCourseService {
     public ExperimentCourseService(
             ExperimentCourseMapper experimentCourseMapper,
             ExperimentCourseSlotMapper experimentCourseSlotMapper,
+            ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper,
             ExperimentCourseTargetClassMapper experimentCourseTargetClassMapper,
             ExperimentCourseTargetStudentMapper experimentCourseTargetStudentMapper,
             ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
+            AttendanceSessionMapper attendanceSessionMapper,
             SemesterMapper semesterMapper,
             OrgClassMapper orgClassMapper,
             SysUserMapper sysUserMapper,
@@ -76,9 +94,11 @@ public class ExperimentCourseService {
     ) {
         this.experimentCourseMapper = experimentCourseMapper;
         this.experimentCourseSlotMapper = experimentCourseSlotMapper;
+        this.experimentCourseSlotInstanceMapper = experimentCourseSlotInstanceMapper;
         this.experimentCourseTargetClassMapper = experimentCourseTargetClassMapper;
         this.experimentCourseTargetStudentMapper = experimentCourseTargetStudentMapper;
         this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
+        this.attendanceSessionMapper = attendanceSessionMapper;
         this.semesterMapper = semesterMapper;
         this.orgClassMapper = orgClassMapper;
         this.sysUserMapper = sysUserMapper;
@@ -91,8 +111,39 @@ public class ExperimentCourseService {
     }
 
     @Transactional
+    public void syncRecurringSlotInstances() {
+        Map<Long, SemesterEntity> semesterCache = new HashMap<>();
+        Map<Long, ExperimentCourseEntity> courseCache = new HashMap<>();
+        Map<Long, List<ExperimentCourseSlotEntity>> slotsByCourse = experimentCourseSlotMapper.selectList(
+                        new LambdaQueryWrapper<ExperimentCourseSlotEntity>().eq(ExperimentCourseSlotEntity::getMode, "RECURRING"))
+                .stream()
+                .collect(Collectors.groupingBy(ExperimentCourseSlotEntity::getCourseId));
+        for (Map.Entry<Long, List<ExperimentCourseSlotEntity>> entry : slotsByCourse.entrySet()) {
+            ExperimentCourseEntity course = courseCache.computeIfAbsent(entry.getKey(), experimentCourseMapper::selectById);
+            if (course == null) {
+                continue;
+            }
+            SemesterEntity semester = semesterCache.computeIfAbsent(course.getSemesterId(), semesterMapper::selectById);
+            if (semester == null) {
+                continue;
+            }
+            List<ExperimentCourseSlotEntity> slots = entry.getValue().stream()
+                    .sorted(Comparator.comparing(ExperimentCourseSlotEntity::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                            .thenComparing(ExperimentCourseSlotEntity::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                    .toList();
+            for (int i = 0; i < slots.size(); i++) {
+                if (slotHasAttendanceHistory(slots.get(i).getId())) {
+                    continue;
+                }
+                rebuildInstances(slots.get(i), semester, i + 1);
+            }
+        }
+    }
+
+    @Transactional
     public ExperimentCourseVO createTeacherCourse(AuthenticatedUser actor, ExperimentCourseSaveRequest request) {
-        validateSaveRequest(request);
+        SemesterEntity semester = requireSemester(request.semesterId());
+        validateSaveRequest(request, semester);
         ExperimentCourseEntity entity = new ExperimentCourseEntity();
         entity.setTitle(request.title().trim());
         entity.setDescription(blankToNull(request.description()));
@@ -104,13 +155,14 @@ public class ExperimentCourseService {
         entity.setUpdatedAt(LocalDateTime.now());
         experimentCourseMapper.insert(entity);
         replaceTargets(entity.getId(), request);
-        replaceSlots(entity.getId(), request);
+        replaceSlots(entity.getId(), request, semester);
         return requireCourseVo(entity.getId());
     }
 
     @Transactional
     public ExperimentCourseVO updateTeacherCourse(Long courseId, AuthenticatedUser actor, ExperimentCourseSaveRequest request) {
-        validateSaveRequest(request);
+        SemesterEntity semester = requireSemester(request.semesterId());
+        validateSaveRequest(request, semester);
         ExperimentCourseEntity entity = requireManageableCourse(courseId, actor);
         entity.setTitle(request.title().trim());
         entity.setDescription(blankToNull(request.description()));
@@ -119,7 +171,7 @@ public class ExperimentCourseService {
         entity.setUpdatedAt(LocalDateTime.now());
         experimentCourseMapper.updateById(entity);
         replaceTargets(courseId, request);
-        replaceSlots(courseId, request);
+        replaceSlots(courseId, request, semester);
         return requireCourseVo(courseId);
     }
 
@@ -139,6 +191,23 @@ public class ExperimentCourseService {
     public List<ExperimentCourseEnrollmentRowVO> listTeacherEnrollments(Long courseId, AuthenticatedUser actor) {
         requireManageableCourse(courseId, actor);
         return experimentCourseSlotMapper.findEnrollmentRowsByCourseId(courseId);
+    }
+
+    public List<ExperimentCourseStudentOptionVO> listTeacherSlotRoster(Long slotId, AuthenticatedUser actor) {
+        ExperimentCourseSlotEntity slot = experimentCourseSlotMapper.selectById(slotId);
+        if (slot == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程场次不存在");
+        }
+        requireManageableCourse(slot.getCourseId(), actor);
+        Map<Long, OrgClassEntity> classMap = loadClassMap(experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(slotId));
+        return experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(slotId).stream()
+                .map(user -> new ExperimentCourseStudentOptionVO(
+                        user.getId(),
+                        user.getUsername(),
+                        user.getDisplayName(),
+                        displayClass(classMap.get(user.getClassId()))
+                ))
+                .toList();
     }
 
     public List<StudentExperimentCourseVO> listStudentAvailableCourses(AuthenticatedUser student) {
@@ -198,7 +267,6 @@ public class ExperimentCourseService {
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "选课成功但读取失败"));
     }
-
     public List<ExperimentCourseStudentOptionVO> listStudentOptions(String q) {
         String keyword = lower(q).trim();
         List<SysUserEntity> users = sysUserMapper.selectList(new LambdaQueryWrapper<SysUserEntity>()
@@ -219,9 +287,9 @@ public class ExperimentCourseService {
     }
 
     public MetaVO getMeta() {
-        List<MetaOptionVO> semesters = semesterMapper.selectList(null).stream()
+        List<SemesterOptionVO> semesters = semesterMapper.selectList(null).stream()
                 .sorted(Comparator.comparing(SemesterEntity::getStartDate, Comparator.nullsLast(Comparator.reverseOrder())))
-                .map(item -> new MetaOptionVO(item.getId(), item.getName()))
+                .map(item -> new SemesterOptionVO(item.getId(), item.getName(), item.getStartDate(), item.getEndDate()))
                 .toList();
         List<MetaOptionVO> timeSlots = timeSlotMapper.findAllOrdered().stream()
                 .map(item -> new MetaOptionVO(item.getId(), item.getName()))
@@ -237,10 +305,18 @@ public class ExperimentCourseService {
         return nvl(experimentCourseEnrollmentMapper.countActiveByCourseAndStudent(courseId, studentId)) > 0;
     }
 
-    private void validateSaveRequest(ExperimentCourseSaveRequest request) {
-        if (semesterMapper.selectById(request.semesterId()) == null) {
+    private SemesterEntity requireSemester(Long semesterId) {
+        SemesterEntity semester = semesterMapper.selectById(semesterId);
+        if (semester == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "semesterId 不存在");
         }
+        if (semester.getStartDate() == null || semester.getEndDate() == null || semester.getEndDate().isBefore(semester.getStartDate())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "学期日期配置不完整，无法生成重复课次");
+        }
+        return semester;
+    }
+
+    private void validateSaveRequest(ExperimentCourseSaveRequest request, SemesterEntity semester) {
         Set<Long> classIds = uniqIds(request.targetClassIds());
         if (!classIds.isEmpty() && orgClassMapper.selectBatchIds(classIds).size() != classIds.size()) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "开放班级中存在无效班级");
@@ -249,14 +325,52 @@ public class ExperimentCourseService {
         if (!studentIds.isEmpty() && sysUserMapper.selectBatchIds(studentIds).size() != studentIds.size()) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "指定学生中存在无效用户");
         }
-        request.slots().forEach(slot -> {
-            if (timeSlotMapper.selectById(slot.slotId()) == null) {
-                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "存在无效节次");
+        Set<Long> requestIds = new LinkedHashSet<>();
+        for (ExperimentCourseSaveRequest.ExperimentCourseSlotRequest slot : request.slots()) {
+            if (slot.id() != null && !requestIds.add(slot.id())) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "存在重复的场次 ID");
             }
-            if (labRoomMapper.selectById(slot.labRoomId()) == null) {
-                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "存在无效实验室");
-            }
-        });
+            validateSlotRequest(slot, semester);
+        }
+    }
+
+    private void validateSlotRequest(ExperimentCourseSaveRequest.ExperimentCourseSlotRequest slot, SemesterEntity semester) {
+        if (timeSlotMapper.selectById(slot.slotId()) == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "存在无效节次");
+        }
+        if (labRoomMapper.selectById(slot.labRoomId()) == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "存在无效实验室");
+        }
+        String mode = upper(slot.mode());
+        if (!SLOT_MODES.contains(mode)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "场次类型只能是 SINGLE 或 RECURRING");
+        }
+        LocalDate firstLessonDate = slot.firstLessonDate();
+        if (firstLessonDate.isBefore(semester.getStartDate()) || firstLessonDate.isAfter(semester.getEndDate())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "首次上课日期必须位于所选学期内");
+        }
+        if ("SINGLE".equals(mode)) {
+            return;
+        }
+        String repeatPattern = upper(slot.repeatPattern());
+        if (!REPEAT_PATTERNS.contains(repeatPattern)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "重复方式只能是 EVERY_WEEK 或 ODD_WEEK");
+        }
+        String rangeMode = upper(slot.rangeMode());
+        if (!RANGE_MODES.contains(rangeMode)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "生效范围只能是 SEMESTER 或 DATE_RANGE");
+        }
+        LocalDate rangeStart = resolveRangeStart(slot, semester);
+        LocalDate rangeEnd = resolveRangeEnd(slot, semester);
+        if (rangeStart.isAfter(rangeEnd)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "日期区间开始时间不能晚于结束时间");
+        }
+        if (rangeStart.isBefore(semester.getStartDate()) || rangeEnd.isAfter(semester.getEndDate())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "多次课的日期范围必须位于所选学期内");
+        }
+        if (firstLessonDate.isBefore(rangeStart) || firstLessonDate.isAfter(rangeEnd)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "首次上课日期必须位于多次课生效范围内");
+        }
     }
 
     private ExperimentCourseEntity requireManageableCourse(Long courseId, AuthenticatedUser actor) {
@@ -295,18 +409,111 @@ public class ExperimentCourseService {
         }
     }
 
-    private void replaceSlots(Long courseId, ExperimentCourseSaveRequest request) {
-        experimentCourseSlotMapper.delete(new LambdaQueryWrapper<ExperimentCourseSlotEntity>().eq(ExperimentCourseSlotEntity::getCourseId, courseId));
-        request.slots().forEach(slot -> {
-            ExperimentCourseSlotEntity entity = new ExperimentCourseSlotEntity();
-            entity.setCourseId(courseId);
-            entity.setLessonDate(slot.lessonDate());
-            entity.setSlotId(slot.slotId());
-            entity.setLabRoomId(slot.labRoomId());
-            entity.setCapacity(slot.capacity());
+    private void replaceSlots(Long courseId, ExperimentCourseSaveRequest request, SemesterEntity semester) {
+        Map<Long, ExperimentCourseSlotEntity> existingById = experimentCourseSlotMapper.selectList(
+                        new LambdaQueryWrapper<ExperimentCourseSlotEntity>().eq(ExperimentCourseSlotEntity::getCourseId, courseId))
+                .stream()
+                .collect(Collectors.toMap(ExperimentCourseSlotEntity::getId, x -> x));
+        Set<Long> retainedIds = new LinkedHashSet<>();
+        for (int i = 0; i < request.slots().size(); i++) {
+            ExperimentCourseSaveRequest.ExperimentCourseSlotRequest slotRequest = request.slots().get(i);
+            ExperimentCourseSlotEntity entity;
+            if (slotRequest.id() != null) {
+                entity = existingById.get(slotRequest.id());
+                if (entity == null) {
+                    throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "场次不存在或不属于当前课程");
+                }
+                retainedIds.add(entity.getId());
+            } else {
+                entity = new ExperimentCourseSlotEntity();
+                entity.setCourseId(courseId);
+                entity.setCreatedAt(LocalDateTime.now());
+            }
+            int enrolledCount = entity.getId() == null ? 0 : nvl(experimentCourseEnrollmentMapper.countEnrolledBySlotId(entity.getId()));
+            if (slotRequest.capacity() < enrolledCount) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "场次容量不能小于已报名人数");
+            }
+            fillSlotEntity(entity, slotRequest);
+            if (entity.getId() == null) {
+                experimentCourseSlotMapper.insert(entity);
+                retainedIds.add(entity.getId());
+            } else {
+                experimentCourseSlotMapper.updateById(entity);
+            }
+            rebuildInstances(entity, semester, i + 1);
+        }
+        for (ExperimentCourseSlotEntity existing : existingById.values()) {
+            if (retainedIds.contains(existing.getId())) {
+                continue;
+            }
+            if (nvl(experimentCourseEnrollmentMapper.countEnrolledBySlotId(existing.getId())) > 0) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "已有学生选择该场次，不能直接删除");
+            }
+            experimentCourseSlotMapper.deleteById(existing.getId());
+        }
+    }
+    private void fillSlotEntity(ExperimentCourseSlotEntity entity, ExperimentCourseSaveRequest.ExperimentCourseSlotRequest request) {
+        String mode = upper(request.mode());
+        entity.setName(blankToNull(request.name()));
+        entity.setMode(mode);
+        entity.setLessonDate(request.firstLessonDate());
+        entity.setFirstLessonDate(request.firstLessonDate());
+        entity.setSlotId(request.slotId());
+        entity.setLabRoomId(request.labRoomId());
+        entity.setCapacity(request.capacity());
+        if ("SINGLE".equals(mode)) {
+            entity.setRepeatPattern(null);
+            entity.setRangeMode(null);
+            entity.setRangeStartDate(request.firstLessonDate());
+            entity.setRangeEndDate(request.firstLessonDate());
+        } else {
+            entity.setRepeatPattern(upper(request.repeatPattern()));
+            entity.setRangeMode(upper(request.rangeMode()));
+            entity.setRangeStartDate(request.rangeStartDate());
+            entity.setRangeEndDate(request.rangeEndDate());
+        }
+    }
+
+    private void rebuildInstances(ExperimentCourseSlotEntity slot, SemesterEntity semester, int slotIndex) {
+        experimentCourseSlotInstanceMapper.delete(new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>()
+                .eq(ExperimentCourseSlotInstanceEntity::getSlotGroupId, slot.getId()));
+        for (InstanceDraft draft : buildInstanceDrafts(slot, semester, slotIndex)) {
+            ExperimentCourseSlotInstanceEntity entity = new ExperimentCourseSlotInstanceEntity();
+            entity.setCourseId(slot.getCourseId());
+            entity.setSlotGroupId(slot.getId());
+            entity.setLessonDate(draft.lessonDate());
+            entity.setTeachingWeek(draft.teachingWeek());
+            entity.setDisplayName(draft.displayName());
+            entity.setSlotId(slot.getSlotId());
+            entity.setLabRoomId(slot.getLabRoomId());
+            entity.setCapacity(slot.getCapacity());
             entity.setCreatedAt(LocalDateTime.now());
-            experimentCourseSlotMapper.insert(entity);
-        });
+            experimentCourseSlotInstanceMapper.insert(entity);
+        }
+    }
+
+    private List<InstanceDraft> buildInstanceDrafts(ExperimentCourseSlotEntity slot, SemesterEntity semester, int slotIndex) {
+        String baseName = slotBaseName(slot, slotIndex);
+        List<InstanceDraft> drafts = new ArrayList<>();
+        if ("SINGLE".equals(upper(slot.getMode()))) {
+            int week = computeTeachingWeek(slot.getFirstLessonDate(), semester);
+            drafts.add(new InstanceDraft(slot.getFirstLessonDate(), week, buildInstanceName(baseName, 1)));
+            return drafts;
+        }
+        LocalDate rangeStart = resolveRangeStart(slot, semester);
+        LocalDate rangeEnd = resolveRangeEnd(slot, semester);
+        long stepWeeks = "ODD_WEEK".equals(upper(slot.getRepeatPattern())) ? 2L : 1L;
+        for (LocalDate lessonDate = slot.getFirstLessonDate(); !lessonDate.isAfter(rangeEnd); lessonDate = lessonDate.plusWeeks(stepWeeks)) {
+            if (lessonDate.isBefore(rangeStart)) {
+                continue;
+            }
+            int teachingWeek = computeTeachingWeek(lessonDate, semester);
+            drafts.add(new InstanceDraft(lessonDate, teachingWeek, buildInstanceName(baseName, drafts.size() + 1)));
+        }
+        if (drafts.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "当前场次规则没有生成任何课次，请检查日期范围设置");
+        }
+        return drafts;
     }
 
     private List<ExperimentCourseVO> hydrateCourses(List<ExperimentCourseSummaryRowVO> summaries) {
@@ -316,6 +523,8 @@ public class ExperimentCourseService {
         List<Long> courseIds = summaries.stream().map(ExperimentCourseSummaryRowVO::id).toList();
         Map<Long, List<ExperimentCourseSlotRowVO>> slotMap = experimentCourseSlotMapper.findRowsByCourseIds(courseIds).stream()
                 .collect(Collectors.groupingBy(ExperimentCourseSlotRowVO::courseId));
+        Map<Long, List<ExperimentCourseSlotInstanceRowVO>> instanceMap = experimentCourseSlotInstanceMapper.findRowsByCourseIds(courseIds).stream()
+                .collect(Collectors.groupingBy(ExperimentCourseSlotInstanceRowVO::slotGroupId));
         Map<Long, List<Long>> classTargetMap = new HashMap<>();
         Map<Long, List<Long>> studentTargetMap = new HashMap<>();
         for (Long courseId : courseIds) {
@@ -335,7 +544,9 @@ public class ExperimentCourseService {
             vo.setEnrollDeadlineAt(summary.enrollDeadlineAt());
             vo.setTargetClassIds(classTargetMap.getOrDefault(summary.id(), List.of()));
             vo.setTargetStudentIds(studentTargetMap.getOrDefault(summary.id(), List.of()));
-            List<ExperimentCourseVO.SlotVO> slots = slotMap.getOrDefault(summary.id(), List.of()).stream().map(this::toSlotVo).toList();
+            List<ExperimentCourseVO.SlotVO> slots = slotMap.getOrDefault(summary.id(), List.of()).stream()
+                    .map(row -> toSlotVo(row, instanceMap.getOrDefault(row.id(), List.of())))
+                    .toList();
             vo.setSlots(slots);
             vo.setTotalEnrolled(slots.stream().map(ExperimentCourseVO.SlotVO::getEnrolledCount).filter(Objects::nonNull).mapToInt(Integer::intValue).sum());
             vo.setCreatedAt(summary.createdAt());
@@ -362,11 +573,17 @@ public class ExperimentCourseService {
         return vo;
     }
 
-    private ExperimentCourseVO.SlotVO toSlotVo(ExperimentCourseSlotRowVO row) {
+    private ExperimentCourseVO.SlotVO toSlotVo(ExperimentCourseSlotRowVO row, List<ExperimentCourseSlotInstanceRowVO> instances) {
         ExperimentCourseVO.SlotVO vo = new ExperimentCourseVO.SlotVO();
         vo.setId(row.id());
         vo.setCourseId(row.courseId());
-        vo.setLessonDate(row.lessonDate());
+        vo.setName(row.name());
+        vo.setMode(row.mode());
+        vo.setFirstLessonDate(row.firstLessonDate());
+        vo.setRepeatPattern(row.repeatPattern());
+        vo.setRangeMode(row.rangeMode());
+        vo.setRangeStartDate(row.rangeStartDate());
+        vo.setRangeEndDate(row.rangeEndDate());
         vo.setSlotId(row.slotId());
         vo.setSlotCode(row.slotCode());
         vo.setSlotName(row.slotName());
@@ -378,9 +595,27 @@ public class ExperimentCourseService {
         int enrolledCount = nvl(row.enrolledCount());
         vo.setEnrolledCount(enrolledCount);
         vo.setRemainingCapacity(Math.max(0, nvl(row.capacity()) - enrolledCount));
+        vo.setInstances(instances.stream().map(this::toInstanceVo).toList());
         return vo;
     }
 
+    private ExperimentCourseVO.InstanceVO toInstanceVo(ExperimentCourseSlotInstanceRowVO row) {
+        ExperimentCourseVO.InstanceVO vo = new ExperimentCourseVO.InstanceVO();
+        vo.setId(row.id());
+        vo.setSlotGroupId(row.slotGroupId());
+        vo.setLessonDate(row.lessonDate());
+        vo.setTeachingWeek(row.teachingWeek());
+        vo.setDisplayName(row.displayName());
+        vo.setSlotId(row.slotId());
+        vo.setSlotCode(row.slotCode());
+        vo.setSlotName(row.slotName());
+        vo.setSlotStartTime(row.slotStartTime());
+        vo.setSlotEndTime(row.slotEndTime());
+        vo.setLabRoomId(row.labRoomId());
+        vo.setLabRoomName(row.labRoomName());
+        vo.setCapacity(row.capacity());
+        return vo;
+    }
     private boolean isEligible(Long courseId, SysUserEntity student) {
         boolean byClass = student.getClassId() != null && experimentCourseTargetClassMapper.findClassIdsByCourseId(courseId).contains(student.getClassId());
         boolean byStudent = experimentCourseTargetStudentMapper.findStudentIdsByCourseId(courseId).contains(student.getId());
@@ -422,6 +657,56 @@ public class ExperimentCourseService {
         return ids.stream().filter(Objects::nonNull).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    private LocalDate resolveRangeStart(ExperimentCourseSaveRequest.ExperimentCourseSlotRequest slot, SemesterEntity semester) {
+        if ("SEMESTER".equals(upper(slot.rangeMode()))) {
+            return semester.getStartDate();
+        }
+        if (slot.rangeStartDate() == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "自定义日期区间必须填写开始日期");
+        }
+        return slot.rangeStartDate();
+    }
+
+    private LocalDate resolveRangeEnd(ExperimentCourseSaveRequest.ExperimentCourseSlotRequest slot, SemesterEntity semester) {
+        if ("SEMESTER".equals(upper(slot.rangeMode()))) {
+            return semester.getEndDate();
+        }
+        if (slot.rangeEndDate() == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "自定义日期区间必须填写结束日期");
+        }
+        return slot.rangeEndDate();
+    }
+
+    private LocalDate resolveRangeStart(ExperimentCourseSlotEntity slot, SemesterEntity semester) {
+        if ("SEMESTER".equals(upper(slot.getRangeMode()))) {
+            return semester.getStartDate();
+        }
+        return Objects.requireNonNullElse(slot.getRangeStartDate(), semester.getStartDate());
+    }
+
+    private LocalDate resolveRangeEnd(ExperimentCourseSlotEntity slot, SemesterEntity semester) {
+        if ("SEMESTER".equals(upper(slot.getRangeMode()))) {
+            return semester.getEndDate();
+        }
+        return Objects.requireNonNullElse(slot.getRangeEndDate(), semester.getEndDate());
+    }
+
+    private int computeTeachingWeek(LocalDate lessonDate, SemesterEntity semester) {
+        LocalDate semesterWeekStart = semester.getStartDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate lessonWeekStart = lessonDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        long diff = ChronoUnit.WEEKS.between(semesterWeekStart, lessonWeekStart);
+        return Math.toIntExact(diff + 1);
+    }
+
+    private String slotBaseName(ExperimentCourseSlotEntity slot, int slotIndex) {
+        String name = blankToNull(slot.getName());
+        return name != null ? name : "场次" + slotIndex;
+    }
+
+    private String buildInstanceName(String baseName, int sequenceWeek) {
+        return baseName + " 第" + sequenceWeek + "周";
+    }
+
     private String blankToNull(String value) {
         String trimmed = value == null ? null : value.trim();
         return trimmed == null || trimmed.isBlank() ? null : trimmed;
@@ -439,6 +724,12 @@ public class ExperimentCourseService {
         return value == null ? 0 : value;
     }
 
+    private boolean slotHasAttendanceHistory(Long slotId) {
+        Long count = attendanceSessionMapper.selectCount(new LambdaQueryWrapper<AttendanceSessionEntity>()
+                .eq(AttendanceSessionEntity::getExperimentCourseSlotId, slotId));
+        return count != null && count > 0;
+    }
+
     private String displayClass(OrgClassEntity clazz) {
         if (clazz == null) {
             return null;
@@ -446,9 +737,15 @@ public class ExperimentCourseService {
         return ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName());
     }
 
+    private record InstanceDraft(LocalDate lessonDate, Integer teachingWeek, String displayName) {
+    }
+
     public record MetaOptionVO(Long id, String name) {
     }
 
-    public record MetaVO(List<MetaOptionVO> semesters, List<MetaOptionVO> timeSlots, List<MetaOptionVO> labRooms) {
+    public record SemesterOptionVO(Long id, String name, LocalDate startDate, LocalDate endDate) {
+    }
+
+    public record MetaVO(List<SemesterOptionVO> semesters, List<MetaOptionVO> timeSlots, List<MetaOptionVO> labRooms) {
     }
 }

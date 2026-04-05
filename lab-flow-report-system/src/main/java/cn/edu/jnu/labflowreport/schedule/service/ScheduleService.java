@@ -6,6 +6,7 @@ import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.elective.vo.StudentEnrollmentRowVO;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseEnrollmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotInstanceMapper;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
@@ -46,6 +47,7 @@ public class ScheduleService {
     private final SysUserMapper sysUserMapper;
     private final LabRoomMapper labRoomMapper;
     private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
+    private final ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper;
     private final AdminAuditService adminAuditService;
 
     public ScheduleService(
@@ -56,6 +58,7 @@ public class ScheduleService {
             SysUserMapper sysUserMapper,
             LabRoomMapper labRoomMapper,
             ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
+            ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper,
             AdminAuditService adminAuditService
     ) {
         this.timeSlotMapper = timeSlotMapper;
@@ -65,6 +68,7 @@ public class ScheduleService {
         this.sysUserMapper = sysUserMapper;
         this.labRoomMapper = labRoomMapper;
         this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
+        this.experimentCourseSlotInstanceMapper = experimentCourseSlotInstanceMapper;
         this.adminAuditService = adminAuditService;
     }
 
@@ -225,11 +229,17 @@ public class ScheduleService {
     public List<TeacherWeekScheduleItemVO> listTeacherWeek(Long teacherId, Long semesterId, LocalDate weekStartDate) {
         LocalDate from = weekStartDate;
         LocalDate to = weekStartDate.plusDays(6);
-        List<TeacherWeekScheduleItemVO> own = courseScheduleMapper.findTeacherWeek(teacherId, semesterId, from, to);
-        if (!own.isEmpty()) {
-            return own;
+        List<TeacherWeekScheduleItemVO> merged = new ArrayList<>(courseScheduleMapper.findTeacherWeek(teacherId, semesterId, from, to));
+        if (merged.isEmpty()) {
+            merged.addAll(courseScheduleMapper.findWeekAnyTeacher(semesterId, from, to));
         }
-        return courseScheduleMapper.findWeekAnyTeacher(semesterId, from, to);
+        merged.forEach(this::normalizeTeacherWeekItem);
+        merged.addAll(experimentCourseSlotInstanceMapper.findTeacherWeekRows(teacherId, semesterId, from, to));
+        merged.sort(Comparator
+                .comparing(TeacherWeekScheduleItemVO::getLessonDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(TeacherWeekScheduleItemVO::getSlotStartTime, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(TeacherWeekScheduleItemVO::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+        return merged;
     }
 
     public List<CourseScheduleVO> listStudentWeek(Long userId, Long semesterId, LocalDate weekStartDate) {
@@ -243,9 +253,8 @@ public class ScheduleService {
         LocalDate from = weekStartDate;
         LocalDate to = weekStartDate.plusDays(6);
         List<CourseScheduleVO> merged = new ArrayList<>(courseScheduleMapper.findSchedules(semesterId, from, to, null, user.getClassId()));
-        experimentCourseEnrollmentMapper.findActiveRowsByStudentId(userId).stream()
+        experimentCourseEnrollmentMapper.findActiveScheduleRowsByStudentId(userId, from, to).stream()
                 .filter(row -> semesterId == null || semesterId.equals(row.semesterId()))
-                .filter(row -> !row.lessonDate().isBefore(from) && !row.lessonDate().isAfter(to))
                 .map(this::toExperimentCourseSchedule)
                 .forEach(merged::add);
         merged.sort(Comparator
@@ -255,9 +264,9 @@ public class ScheduleService {
         return merged;
     }
 
-    private CourseScheduleVO toExperimentCourseSchedule(StudentEnrollmentRowVO row) {
+    private CourseScheduleVO toExperimentCourseSchedule(StudentEnrollmentRowVO.ScheduleRow row) {
         CourseScheduleVO vo = new CourseScheduleVO();
-        vo.setId(row.enrollmentId());
+        vo.setId(row.instanceId());
         vo.setSourceType("EXPERIMENT_COURSE");
         vo.setExperimentCourseId(row.courseId());
         vo.setSemesterId(row.semesterId());
@@ -270,11 +279,17 @@ public class ScheduleService {
         vo.setLessonDate(row.lessonDate());
         vo.setSlotId(row.slotId());
         vo.setSlotCode(row.slotCode());
-        vo.setSlotName(row.slotName());
+        vo.setSlotName(row.instanceDisplayName());
         vo.setSlotStartTime(row.slotStartTime());
         vo.setSlotEndTime(row.slotEndTime());
         vo.setCourseName(row.courseTitle());
         return vo;
+    }
+
+    private void normalizeTeacherWeekItem(TeacherWeekScheduleItemVO item) {
+        if (item.getSourceType() == null || item.getSourceType().isBlank()) {
+            item.setSourceType("CLASS_SCHEDULE");
+        }
     }
 
     private void createCourseSchedulePrecheck(AdminCourseScheduleRequest request) {

@@ -17,20 +17,28 @@ import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotInstanceEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseEnrollmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotInstanceMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.schedule.entity.CourseScheduleEntity;
 import cn.edu.jnu.labflowreport.schedule.mapper.CourseScheduleMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Base64;
-import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,11 +47,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AttendanceService {
 
+    private static final String SOURCE_CLASS_SCHEDULE = "CLASS_SCHEDULE";
+    private static final String SOURCE_EXPERIMENT_COURSE = "EXPERIMENT_COURSE";
+
     private final AttendanceSessionMapper sessionMapper;
     private final AttendanceRecordMapper recordMapper;
     private final AttendanceTokenService tokenService;
     private final CourseScheduleMapper courseScheduleMapper;
     private final SysUserMapper sysUserMapper;
+    private final ExperimentCourseMapper experimentCourseMapper;
+    private final ExperimentCourseSlotMapper experimentCourseSlotMapper;
+    private final ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper;
+    private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
     private final SecureRandom random = new SecureRandom();
     private final int defaultTokenTtlSeconds;
 
@@ -53,6 +68,10 @@ public class AttendanceService {
             AttendanceTokenService tokenService,
             CourseScheduleMapper courseScheduleMapper,
             SysUserMapper sysUserMapper,
+            ExperimentCourseMapper experimentCourseMapper,
+            ExperimentCourseSlotMapper experimentCourseSlotMapper,
+            ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper,
+            ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
             @Value("${ATT_TOKEN_TTL_SECONDS:6}") int defaultTokenTtlSeconds
     ) {
         this.sessionMapper = sessionMapper;
@@ -60,6 +79,10 @@ public class AttendanceService {
         this.tokenService = tokenService;
         this.courseScheduleMapper = courseScheduleMapper;
         this.sysUserMapper = sysUserMapper;
+        this.experimentCourseMapper = experimentCourseMapper;
+        this.experimentCourseSlotMapper = experimentCourseSlotMapper;
+        this.experimentCourseSlotInstanceMapper = experimentCourseSlotInstanceMapper;
+        this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
         this.defaultTokenTtlSeconds = clampTtl(defaultTokenTtlSeconds);
     }
 
@@ -69,51 +92,84 @@ public class AttendanceService {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限开启签到");
         }
 
-        Long scheduleId = request.scheduleId();
-        Long semesterId;
-        Long classId;
-        Long teacherId;
-
-        if (scheduleId != null) {
-            CourseScheduleEntity schedule = courseScheduleMapper.selectById(scheduleId);
-            if (schedule == null) {
-                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "课表项不存在");
-            }
-            if (actor.roleCodes().contains("ROLE_TEACHER") && !schedule.getTeacherId().equals(actor.userId())) {
-                throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只能开启自己课表下的签到");
-            }
-            semesterId = schedule.getSemesterId();
-            classId = schedule.getClassId();
-            teacherId = schedule.getTeacherId();
-        } else {
-            if (request.semesterId() == null || request.classId() == null) {
-                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "semesterId 和 classId 不能为空");
-            }
-            semesterId = request.semesterId();
-            classId = request.classId();
-            teacherId = actor.userId();
-        }
-
-        AttendanceSessionEntity existing = (scheduleId != null)
-                ? sessionMapper.findOpenByScheduleId(scheduleId)
-                : sessionMapper.findOpenByKey(semesterId, classId, teacherId);
-        if (existing != null) {
-            return toVo(existing);
-        }
-
+        AttendanceSessionEntity existing;
         AttendanceSessionEntity entity = new AttendanceSessionEntity();
-        entity.setScheduleId(scheduleId);
-        entity.setSemesterId(semesterId);
-        entity.setClassId(classId);
-        entity.setTeacherId(teacherId);
         entity.setStatus("OPEN");
         entity.setTokenTtlSeconds(resolveRequestedTtl(request.tokenTtlSeconds()));
         entity.setStartedAt(LocalDateTime.now());
         entity.setEndedAt(null);
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
-        sessionMapper.insert(entity);
 
+        if (request.experimentCourseInstanceId() != null) {
+            ExperimentCourseSlotInstanceEntity instance = experimentCourseSlotInstanceMapper.selectById(request.experimentCourseInstanceId());
+            if (instance == null) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程课次不存在");
+            }
+            ExperimentCourseSlotEntity slot = experimentCourseSlotMapper.selectById(instance.getSlotGroupId());
+            if (slot == null) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程场次不存在");
+            }
+            ExperimentCourseEntity course = experimentCourseMapper.selectById(instance.getCourseId());
+            if (course == null) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程不存在");
+            }
+            if (actor.roleCodes().contains("ROLE_TEACHER") && !course.getTeacherId().equals(actor.userId())) {
+                throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只能开启自己实验课程课次的签到");
+            }
+            existing = sessionMapper.findOpenByExperimentInstanceId(instance.getId());
+            entity.setSourceType(SOURCE_EXPERIMENT_COURSE);
+            entity.setScheduleId(null);
+            entity.setSemesterId(course.getSemesterId());
+            entity.setClassId(null);
+            entity.setTeacherId(course.getTeacherId());
+            entity.setExperimentCourseId(course.getId());
+            entity.setExperimentCourseSlotId(slot.getId());
+            entity.setExperimentCourseInstanceId(instance.getId());
+        } else {
+            Long scheduleId = request.scheduleId();
+            Long semesterId;
+            Long classId;
+            Long teacherId;
+
+            if (scheduleId != null) {
+                CourseScheduleEntity schedule = courseScheduleMapper.selectById(scheduleId);
+                if (schedule == null) {
+                    throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "课表项不存在");
+                }
+                if (actor.roleCodes().contains("ROLE_TEACHER") && !schedule.getTeacherId().equals(actor.userId())) {
+                    throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只能开启自己课表下的签到");
+                }
+                semesterId = schedule.getSemesterId();
+                classId = schedule.getClassId();
+                teacherId = schedule.getTeacherId();
+            } else {
+                if (request.semesterId() == null || request.classId() == null) {
+                    throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "semesterId 和 classId 不能为空");
+                }
+                semesterId = request.semesterId();
+                classId = request.classId();
+                teacherId = actor.userId();
+            }
+
+            existing = (scheduleId != null)
+                    ? sessionMapper.findOpenByScheduleId(scheduleId)
+                    : sessionMapper.findOpenByKey(semesterId, classId, teacherId);
+            entity.setSourceType(SOURCE_CLASS_SCHEDULE);
+            entity.setScheduleId(scheduleId);
+            entity.setSemesterId(semesterId);
+            entity.setClassId(classId);
+            entity.setTeacherId(teacherId);
+            entity.setExperimentCourseId(null);
+            entity.setExperimentCourseSlotId(null);
+            entity.setExperimentCourseInstanceId(null);
+        }
+
+        if (existing != null) {
+            return toVo(existing);
+        }
+
+        sessionMapper.insert(entity);
         AttendanceSessionVO vo = toVo(entity);
         vo.setId(entity.getId());
         return vo;
@@ -184,20 +240,14 @@ public class AttendanceService {
         AttendanceTokenService.ParsedToken parsed = tokenService.parseAndValidate(token);
         AttendanceSessionEntity session = getOpenSessionOrThrow(parsed.sessionId());
 
-        // Expiry is per-session configurable.
         long now = Instant.now().getEpochSecond();
         int ttlSeconds = getSessionTokenTtlSeconds(session);
         if (now - parsed.issuedAtEpochSec() >= ttlSeconds) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
         }
 
-        SysUserEntity me = sysUserMapper.selectById(student.userId());
-        if (me == null) {
-            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
-        }
-        if (me.getClassId() == null || !me.getClassId().equals(session.getClassId())) {
-            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该班级，无法签到");
-        }
+        SysUserEntity me = requireExistingUser(student.userId());
+        ensureStudentMatchesSession(student.userId(), me, session, "无法签到");
 
         AttendanceRecordEntity existing = recordMapper.selectOne(
                 new LambdaQueryWrapper<AttendanceRecordEntity>()
@@ -253,13 +303,8 @@ public class AttendanceService {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "二维码已过期，请让老师刷新二维码重新扫码");
         }
 
-        SysUserEntity me = sysUserMapper.selectById(student.userId());
-        if (me == null) {
-            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
-        }
-        if (me.getClassId() == null || !me.getClassId().equals(session.getClassId())) {
-            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该班级，无法签到");
-        }
+        SysUserEntity me = requireExistingUser(student.userId());
+        ensureStudentMatchesSession(student.userId(), me, session, "无法签到");
 
         AttendanceRecordEntity existing = recordMapper.selectOne(
                 new LambdaQueryWrapper<AttendanceRecordEntity>()
@@ -290,13 +335,8 @@ public class AttendanceService {
         AttendanceSessionEntity session = getOpenSessionOrThrow(sessionId);
         ensureTeacherOrAdmin(actor, session);
 
-        SysUserEntity student = sysUserMapper.selectById(request.studentId());
-        if (student == null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "studentId 不存在");
-        }
-        if (student.getClassId() == null || !student.getClassId().equals(session.getClassId())) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该学生不属于本班，无法补签");
-        }
+        SysUserEntity student = requireExistingUser(request.studentId());
+        ensureStudentMatchesSession(request.studentId(), student, session, "无法补签");
 
         AttendanceRecordEntity existing = recordMapper.selectOne(
                 new LambdaQueryWrapper<AttendanceRecordEntity>()
@@ -329,7 +369,7 @@ public class AttendanceService {
     public String exportRecordsCsv(AuthenticatedUser actor, Long sessionId) {
         AttendanceSessionEntity session = getSessionOrThrow(sessionId);
         ensureTeacherOrAdmin(actor, session);
-        List<SysUserEntity> roster = sysUserMapper.findStudentsByClassId(session.getClassId());
+        List<SysUserEntity> roster = loadRosterUsers(session);
         List<AttendanceRecordVO> records = recordMapper.findRecordsBySessionId(sessionId);
 
         Map<Long, AttendanceRecordVO> recordByStudentId = new HashMap<>();
@@ -349,7 +389,6 @@ public class AttendanceService {
         StringBuilder csv = new StringBuilder();
         csv.append("studentUsername,studentDisplayName,status,method,checkedInAt\n");
 
-        // Export full roster: who checked in and who did not.
         for (SysUserEntity u : roster) {
             AttendanceRecordVO r = recordByStudentId.get(u.getId());
             boolean checkedIn = r != null;
@@ -360,11 +399,10 @@ public class AttendanceService {
             csv.append(csvCell(checkedIn ? r.getCheckedInAt() : "")).append("\n");
         }
 
-        // Safety: if a record exists for a user not in current roster (e.g., disabled later), still include it.
         for (AttendanceRecordVO r : records) {
-            if (r.getStudentId() == null) continue;
-            if (rosterIds.contains(r.getStudentId())) continue;
-
+            if (r.getStudentId() == null || rosterIds.contains(r.getStudentId())) {
+                continue;
+            }
             csv.append(csvCell(r.getStudentUsername())).append(",");
             csv.append(csvCell(r.getStudentDisplayName())).append(",");
             csv.append(csvCell("CHECKED_IN")).append(",");
@@ -376,6 +414,7 @@ public class AttendanceService {
 
     public PageResult<TeacherAttendanceSessionListItemVO> listTeacherSessions(
             AuthenticatedUser actor,
+            String sourceType,
             Integer grade,
             Long classId,
             String roomKeyword,
@@ -394,12 +433,12 @@ public class AttendanceService {
         int safeSize = Math.min(Math.max(1, size), 200);
         int offset = (safePage - 1) * safeSize;
         Long teacherId = isAdmin ? null : actor.userId();
-        long total = sessionMapper.countTeacherHistorySessions(teacherId, grade, classId, roomKeyword, from, to, status);
+        long total = sessionMapper.countTeacherHistorySessions(teacherId, normalizeSourceType(sourceType), grade, classId, roomKeyword, from, to, status);
         if (total <= 0) {
             return new PageResult<>(safePage, safeSize, 0, List.of());
         }
         List<TeacherAttendanceSessionListItemVO> items = sessionMapper.findTeacherHistorySessions(
-                teacherId, grade, classId, roomKeyword, from, to, status, safeSize, offset
+                teacherId, normalizeSourceType(sourceType), grade, classId, roomKeyword, from, to, status, safeSize, offset
         );
         items.forEach(this::normalizeHistoryItem);
         return new PageResult<>(safePage, safeSize, total, items);
@@ -420,10 +459,14 @@ public class AttendanceService {
 
         TeacherAttendanceSessionDetailVO detail = new TeacherAttendanceSessionDetailVO();
         detail.setSessionId(meta.getSessionId());
+        detail.setSourceType(meta.getSourceType());
         detail.setCourseName(meta.getCourseName());
         detail.setClassId(meta.getClassId());
         detail.setClassDisplayName(meta.getClassDisplayName());
         detail.setGrade(meta.getGrade());
+        detail.setExperimentCourseId(meta.getExperimentCourseId());
+        detail.setExperimentCourseSlotId(meta.getExperimentCourseSlotId());
+        detail.setExperimentCourseInstanceId(meta.getExperimentCourseInstanceId());
         detail.setLabRoomName(meta.getLabRoomName());
         detail.setLessonDate(meta.getLessonDate());
         detail.setSlotName(meta.getSlotName());
@@ -433,17 +476,21 @@ public class AttendanceService {
         detail.setCheckedInCount(meta.getCheckedInCount());
         detail.setTotalCount(meta.getTotalCount());
         detail.setAbsentCount(meta.getAbsentCount());
-        detail.setRoster(buildRosterStatuses(sessionId, session.getClassId()));
+        detail.setRoster(buildRosterStatuses(sessionId, session));
         return detail;
     }
 
     public AttendanceSessionVO toVo(AttendanceSessionEntity entity) {
         AttendanceSessionVO vo = new AttendanceSessionVO();
         vo.setId(entity.getId());
+        vo.setSourceType(entity.getSourceType());
         vo.setScheduleId(entity.getScheduleId());
         vo.setSemesterId(entity.getSemesterId());
         vo.setClassId(entity.getClassId());
         vo.setTeacherId(entity.getTeacherId());
+        vo.setExperimentCourseId(entity.getExperimentCourseId());
+        vo.setExperimentCourseSlotId(entity.getExperimentCourseSlotId());
+        vo.setExperimentCourseInstanceId(entity.getExperimentCourseInstanceId());
         vo.setStatus(entity.getStatus());
         vo.setTokenTtlSeconds(entity.getTokenTtlSeconds());
         vo.setStartedAt(entity.getStartedAt());
@@ -455,10 +502,43 @@ public class AttendanceService {
         if (actor.roleCodes().contains("ROLE_ADMIN")) {
             return;
         }
-        if (actor.roleCodes().contains("ROLE_TEACHER") && session.getTeacherId().equals(actor.userId())) {
+        if (actor.roleCodes().contains("ROLE_TEACHER") && session.getTeacherId() != null && session.getTeacherId().equals(actor.userId())) {
             return;
         }
         throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "无权限操作该签到场次");
+    }
+
+    private SysUserEntity requireExistingUser(Long userId) {
+        SysUserEntity user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "用户不存在或已被删除");
+        }
+        return user;
+    }
+
+    private void ensureStudentMatchesSession(Long studentId, SysUserEntity user, AttendanceSessionEntity session, String suffix) {
+        if (SOURCE_EXPERIMENT_COURSE.equalsIgnoreCase(session.getSourceType())) {
+            if (session.getExperimentCourseSlotId() == null || nvl(experimentCourseEnrollmentMapper.countActiveBySlotAndStudent(session.getExperimentCourseSlotId(), studentId)) <= 0) {
+                throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该实验课程场次名单，" + suffix);
+            }
+            return;
+        }
+        if (user.getClassId() == null || !user.getClassId().equals(session.getClassId())) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该班级，" + suffix);
+        }
+    }
+
+    private List<SysUserEntity> loadRosterUsers(AttendanceSessionEntity session) {
+        if (SOURCE_EXPERIMENT_COURSE.equalsIgnoreCase(session.getSourceType())) {
+            if (session.getExperimentCourseSlotId() == null) {
+                return List.of();
+            }
+            return experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(session.getExperimentCourseSlotId());
+        }
+        if (session.getClassId() == null) {
+            return List.of();
+        }
+        return sysUserMapper.findStudentsByClassId(session.getClassId());
     }
 
     private String csvCell(Object value) {
@@ -467,8 +547,8 @@ public class AttendanceService {
         return "\"" + text + "\"";
     }
 
-    private List<TeacherAttendanceStudentStatusVO> buildRosterStatuses(Long sessionId, Long classId) {
-        List<SysUserEntity> roster = sysUserMapper.findStudentsByClassId(classId);
+    private List<TeacherAttendanceStudentStatusVO> buildRosterStatuses(Long sessionId, AttendanceSessionEntity session) {
+        List<SysUserEntity> roster = loadRosterUsers(session);
         List<AttendanceRecordVO> records = recordMapper.findRecordsBySessionId(sessionId);
         Map<Long, AttendanceRecordVO> recordByStudentId = new HashMap<>();
         for (AttendanceRecordVO record : records) {
@@ -477,7 +557,7 @@ public class AttendanceService {
             }
         }
 
-        List<TeacherAttendanceStudentStatusVO> result = new java.util.ArrayList<>();
+        List<TeacherAttendanceStudentStatusVO> result = new ArrayList<>();
         Set<Long> rosterIds = new HashSet<>();
         for (SysUserEntity user : roster) {
             rosterIds.add(user.getId());
@@ -508,7 +588,7 @@ public class AttendanceService {
     }
 
     private void fillAbsentCount(TeacherAttendanceSessionListItemVO item) {
-        if (item.getGrade() == null) {
+        if (item.getGrade() == null && SOURCE_CLASS_SCHEDULE.equalsIgnoreCase(item.getSourceType())) {
             item.setGrade(ClassDisplayUtils.effectiveGrade(null, item.getClassDisplayName()));
         }
         item.setAbsentCount(Math.max(0, item.getTotalCount() - item.getCheckedInCount()));
@@ -516,6 +596,17 @@ public class AttendanceService {
 
     private void normalizeHistoryItem(TeacherAttendanceSessionListItemVO item) {
         fillAbsentCount(item);
+    }
+
+    private String normalizeSourceType(String sourceType) {
+        if (sourceType == null || sourceType.isBlank()) {
+            return null;
+        }
+        String normalized = sourceType.trim().toUpperCase();
+        if (!SOURCE_CLASS_SCHEDULE.equals(normalized) && !SOURCE_EXPERIMENT_COURSE.equals(normalized)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "sourceType 只能是 CLASS_SCHEDULE 或 EXPERIMENT_COURSE");
+        }
+        return normalized;
     }
 
     private String generateStaticCodeUnique() {
@@ -526,7 +617,6 @@ public class AttendanceService {
                 return code;
             }
         }
-        // Very unlikely; last resort generate without checking and rely on unique index.
         return randomStaticCode();
     }
 
@@ -549,6 +639,10 @@ public class AttendanceService {
         if (v < 3) v = 3;
         if (v > 60) v = 60;
         return v;
+    }
+
+    private int nvl(Integer value) {
+        return value == null ? 0 : value;
     }
 
     public record CheckinResult(Long recordId, boolean alreadyCheckedIn, LocalDateTime checkedInAt) {

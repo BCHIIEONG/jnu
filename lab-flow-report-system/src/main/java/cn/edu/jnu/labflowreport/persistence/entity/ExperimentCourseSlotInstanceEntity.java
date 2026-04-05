@@ -8,22 +8,18 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("experiment_course_slot")
-public class ExperimentCourseSlotEntity {
+@TableName("experiment_course_slot_instance")
+public class ExperimentCourseSlotInstanceEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long courseId;
+    private Long slotGroupId;
     private LocalDate lessonDate;
-    private String name;
-    private String mode;
-    private LocalDate firstLessonDate;
+    private Integer teachingWeek;
+    private String displayName;
     private Long slotId;
     private Long labRoomId;
     private Integer capacity;
-    private String repeatPattern;
-    private String rangeMode;
-    private LocalDate rangeStartDate;
-    private LocalDate rangeEndDate;
     private LocalDateTime createdAt;
 }

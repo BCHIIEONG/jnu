@@ -26,15 +26,22 @@ public record ExperimentCourseSaveRequest(
 ) {
     public record ExperimentCourseSlotRequest(
             Long id,
-            @NotNull(message = "lessonDate 不能为空")
-            LocalDate lessonDate,
+            String name,
+            @NotBlank(message = "mode 不能为空")
+            String mode,
+            @NotNull(message = "firstLessonDate 不能为空")
+            LocalDate firstLessonDate,
             @NotNull(message = "slotId 不能为空")
             Long slotId,
             @NotNull(message = "labRoomId 不能为空")
             Long labRoomId,
             @NotNull(message = "capacity 不能为空")
             @Min(value = 1, message = "capacity 至少为 1")
-            Integer capacity
+            Integer capacity,
+            String repeatPattern,
+            String rangeMode,
+            LocalDate rangeStartDate,
+            LocalDate rangeEndDate
     ) {
     }
 }

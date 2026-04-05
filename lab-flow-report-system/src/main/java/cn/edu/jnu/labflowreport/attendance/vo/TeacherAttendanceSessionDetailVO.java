@@ -8,10 +8,14 @@ import lombok.Data;
 @Data
 public class TeacherAttendanceSessionDetailVO {
     private Long sessionId;
+    private String sourceType;
     private String courseName;
     private Long classId;
     private String classDisplayName;
     private Integer grade;
+    private Long experimentCourseId;
+    private Long experimentCourseSlotId;
+    private Long experimentCourseInstanceId;
     private String labRoomName;
     private LocalDate lessonDate;
     private String slotName;

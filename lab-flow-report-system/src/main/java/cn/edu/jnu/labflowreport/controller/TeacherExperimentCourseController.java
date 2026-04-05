@@ -67,6 +67,12 @@ public class TeacherExperimentCourseController {
         return ApiResponse.success(experimentCourseService.listStudentOptions(q));
     }
 
+    @GetMapping("/experiment-course-slots/{slotId}/roster")
+    public ApiResponse<List<ExperimentCourseStudentOptionVO>> listSlotRoster(@PathVariable Long slotId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(experimentCourseService.listTeacherSlotRoster(slotId, user));
+    }
+
     @GetMapping("/experiment-courses/meta")
     public ApiResponse<ExperimentCourseService.MetaVO> getMeta() {
         return ApiResponse.success(experimentCourseService.getMeta());

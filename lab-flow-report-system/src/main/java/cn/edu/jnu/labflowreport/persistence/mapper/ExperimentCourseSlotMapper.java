@@ -19,7 +19,13 @@ public interface ExperimentCourseSlotMapper extends BaseMapper<ExperimentCourseS
             <script>
             SELECT ecs.id,
                    ecs.course_id,
-                   ecs.lesson_date,
+                   ecs.name,
+                   ecs.mode,
+                   ecs.first_lesson_date,
+                   ecs.repeat_pattern,
+                   ecs.range_mode,
+                   ecs.range_start_date,
+                   ecs.range_end_date,
                    ecs.slot_id,
                    ts.code AS slot_code,
                    ts.name AS slot_name,
@@ -42,7 +48,7 @@ public interface ExperimentCourseSlotMapper extends BaseMapper<ExperimentCourseS
             <foreach collection="courseIds" item="courseId" open="(" separator="," close=")">
                 #{courseId}
             </foreach>
-            ORDER BY ecs.lesson_date ASC, ts.start_time ASC, ecs.id ASC
+            ORDER BY ecs.first_lesson_date ASC, ts.start_time ASC, ecs.id ASC
             </script>
             """)
     List<ExperimentCourseSlotRowVO> findRowsByCourseIds(@Param("courseIds") List<Long> courseIds);
@@ -51,8 +57,8 @@ public interface ExperimentCourseSlotMapper extends BaseMapper<ExperimentCourseS
             SELECT ec.id AS course_id,
                    ec.title AS course_title,
                    ecs.id AS slot_id,
-                   ecs.lesson_date,
-                   ts.name AS slot_name,
+                   ecs.first_lesson_date AS lesson_date,
+                   COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,
                    lr.name AS lab_room_name,
                    ecs.capacity,
                    u.id AS student_id,
@@ -63,13 +69,12 @@ public interface ExperimentCourseSlotMapper extends BaseMapper<ExperimentCourseS
             FROM experiment_course_enrollment e
             JOIN experiment_course ec ON ec.id = e.course_id
             JOIN experiment_course_slot ecs ON ecs.id = e.slot_id
-            JOIN time_slot ts ON ts.id = ecs.slot_id
             JOIN lab_room lr ON lr.id = ecs.lab_room_id
             JOIN sys_user u ON u.id = e.student_id
             LEFT JOIN org_class c ON c.id = u.class_id
             WHERE e.course_id = #{courseId}
               AND e.status = 'ENROLLED'
-            ORDER BY ecs.lesson_date ASC, ts.start_time ASC, e.selected_at ASC, u.username ASC
+            ORDER BY ecs.first_lesson_date ASC, e.selected_at ASC, u.username ASC
             """)
     List<ExperimentCourseEnrollmentRowVO> findEnrollmentRowsByCourseId(Long courseId);
 }

@@ -16,14 +16,33 @@ public record StudentEnrollmentRowVO(
         String status,
         LocalDateTime enrollDeadlineAt,
         Long slotId,
-        LocalDate lessonDate,
-        String slotCode,
-        String slotName,
-        LocalTime slotStartTime,
-        LocalTime slotEndTime,
-        Long labRoomId,
-        String labRoomName,
-        Integer capacity,
+        String slotGroupName,
+        String slotMode,
+        LocalDate firstLessonDate,
+        String repeatPattern,
+        String rangeMode,
+        LocalDate rangeStartDate,
+        LocalDate rangeEndDate,
         LocalDateTime selectedAt
 ) {
+    public record ScheduleRow(
+            Long enrollmentId,
+            Long courseId,
+            String courseTitle,
+            Long teacherId,
+            String teacherDisplayName,
+            Long semesterId,
+            Long slotId,
+            Long instanceId,
+            String instanceDisplayName,
+            Integer teachingWeek,
+            LocalDate lessonDate,
+            String slotCode,
+            String slotName,
+            LocalTime slotStartTime,
+            LocalTime slotEndTime,
+            Long labRoomId,
+            String labRoomName
+    ) {
+    }
 }

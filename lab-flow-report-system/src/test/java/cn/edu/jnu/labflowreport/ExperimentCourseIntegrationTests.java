@@ -66,7 +66,9 @@ class ExperimentCourseIntegrationTests {
                                   "targetStudentIds":[],
                                   "slots":[
                                     {
-                                      "lessonDate":"%s",
+                                      "name":"单次场次A",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
                                       "slotId":%d,
                                       "labRoomId":%d,
                                       "capacity":1
@@ -186,7 +188,9 @@ class ExperimentCourseIntegrationTests {
                                   "targetStudentIds":[%d],
                                   "slots":[
                                     {
-                                      "lessonDate":"%s",
+                                      "name":"单次场次B",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
                                       "slotId":%d,
                                       "labRoomId":%d,
                                       "capacity":1
@@ -235,6 +239,234 @@ class ExperimentCourseIntegrationTests {
                                 """.formatted(slotId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("当前场次名额已满"));
+    }
+
+    @Test
+    void recurringExperimentCourseShouldGenerateInstancesAndMergeIntoSchedule() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+        String studentToken = login("student", "student123");
+
+        TeacherMeta meta = loadTeacherMeta(teacherToken);
+        LocalDate firstLessonDate = meta.semesterStartDate().plusDays(2);
+        String courseTitle = "重复实验课程_" + System.currentTimeMillis();
+
+        MvcResult createCourseResult = mockMvc.perform(post("/api/teacher/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"重复场次测试",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[1],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "name":"C语言A班",
+                                      "mode":"RECURRING",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5,
+                                      "repeatPattern":"ODD_WEEK",
+                                      "rangeMode":"DATE_RANGE",
+                                      "rangeStartDate":"%s",
+                                      "rangeEndDate":"%s"
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                firstLessonDate,
+                                meta.slotId(),
+                                meta.labRoomId(),
+                                firstLessonDate,
+                                firstLessonDate.plusWeeks(4))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.slots[0].instances.length()").value(3))
+                .andExpect(jsonPath("$.data.slots[0].instances[0].lessonDate").value(firstLessonDate.toString()))
+                .andExpect(jsonPath("$.data.slots[0].instances[1].lessonDate").value(firstLessonDate.plusWeeks(2).toString()))
+                .andExpect(jsonPath("$.data.slots[0].instances[2].lessonDate").value(firstLessonDate.plusWeeks(4).toString()))
+                .andExpect(jsonPath("$.data.slots[0].instances[0].displayName").value(containsString("第1周")))
+                .andExpect(jsonPath("$.data.slots[0].instances[1].displayName").value(containsString("第2周")))
+                .andReturn();
+
+        long courseId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+        long slotGroupId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].id")).longValue();
+
+        mockMvc.perform(post("/api/student/experiment-courses/" + courseId + "/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"slotId":%d}
+                                """.formatted(slotGroupId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.selectedSlotId").value(slotGroupId))
+                .andExpect(jsonPath("$.data.slots[0].instances.length()").value(3));
+
+        LocalDate weekStart = firstLessonDate.with(DayOfWeek.MONDAY);
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .param("semesterId", String.valueOf(meta.semesterId()))
+                        .param("weekStartDate", weekStart.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("EXPERIMENT_COURSE")))
+                .andExpect(content().string(containsString(courseTitle)))
+                .andExpect(content().string(containsString("第1周")));
+    }
+
+    @Test
+    void experimentCourseTeacherScheduleAndAttendanceShouldWork() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+
+        long departmentId = createDepartment(adminToken, "实验课程签到院系_" + System.currentTimeMillis());
+        long classId = createClass(adminToken, departmentId, 2026, "实验课程签到班");
+
+        String enrolledUsername = "ec_attend_in_" + System.currentTimeMillis();
+        String notEnrolledUsername = "ec_attend_out_" + System.currentTimeMillis();
+        createUser(adminToken, enrolledUsername, "已选课学生", "student123", classId, "[\"ROLE_STUDENT\"]", null);
+        createUser(adminToken, notEnrolledUsername, "未选课学生", "student123", classId, "[\"ROLE_STUDENT\"]", null);
+        String enrolledToken = login(enrolledUsername, "student123");
+        String notEnrolledToken = login(notEnrolledUsername, "student123");
+
+        TeacherMeta meta = loadTeacherMeta(teacherToken);
+        LocalDate firstLessonDate = meta.semesterStartDate().plusDays(1);
+        String courseTitle = "实验课程签到链_" + System.currentTimeMillis();
+
+        MvcResult createCourseResult = mockMvc.perform(post("/api/teacher/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"实验课程签到测试",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[%d],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "name":"签到场次A",
+                                      "mode":"RECURRING",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5,
+                                      "repeatPattern":"EVERY_WEEK",
+                                      "rangeMode":"DATE_RANGE",
+                                      "rangeStartDate":"%s",
+                                      "rangeEndDate":"%s"
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                classId,
+                                firstLessonDate,
+                                meta.slotId(),
+                                meta.labRoomId(),
+                                firstLessonDate,
+                                firstLessonDate.plusWeeks(1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+
+        long courseId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+        long slotGroupId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].id")).longValue();
+        long instanceId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].instances[0].id")).longValue();
+
+        mockMvc.perform(post("/api/student/experiment-courses/" + courseId + "/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + enrolledToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"slotId":%d}
+                                """.formatted(slotGroupId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.selectedSlotId").value(slotGroupId));
+
+        LocalDate weekStart = firstLessonDate.with(DayOfWeek.MONDAY);
+        mockMvc.perform(get("/api/teacher/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .param("semesterId", String.valueOf(meta.semesterId()))
+                        .param("weekStartDate", weekStart.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("EXPERIMENT_COURSE")))
+                .andExpect(content().string(containsString(courseTitle)));
+
+        mockMvc.perform(get("/api/teacher/experiment-course-slots/" + slotGroupId + "/roster")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(enrolledUsername)))
+                .andExpect(content().string(not(containsString(notEnrolledUsername))));
+
+        MvcResult sessionResult = mockMvc.perform(post("/api/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"experimentCourseInstanceId":%d,"tokenTtlSeconds":30}
+                                """.formatted(instanceId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.sourceType").value("EXPERIMENT_COURSE"))
+                .andExpect(jsonPath("$.data.experimentCourseSlotId").value(slotGroupId))
+                .andReturn();
+        long sessionId = ((Number) JsonPath.read(sessionResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MvcResult staticCodeResult = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/static-code")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        String staticCode = JsonPath.read(staticCodeResult.getResponse().getContentAsString(), "$.data.code");
+
+        mockMvc.perform(post("/api/attendance/checkin/static")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + enrolledToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"%s"}
+                                """.formatted(staticCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.alreadyCheckedIn").value(false));
+
+        mockMvc.perform(post("/api/attendance/checkin/static")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + notEnrolledToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"%s"}
+                                """.formatted(staticCode)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(containsString("不属于该实验课程场次名单")));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .param("sourceType", "EXPERIMENT_COURSE")
+                        .param("status", "OPEN")
+                        .param("page", "1")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(courseTitle)))
+                .andExpect(content().string(containsString("EXPERIMENT_COURSE")));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions/" + sessionId + "/detail")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sourceType").value("EXPERIMENT_COURSE"))
+                .andExpect(jsonPath("$.data.totalCount").value(1))
+                .andExpect(content().string(containsString(enrolledUsername)))
+                .andExpect(content().string(not(containsString(notEnrolledUsername))));
+
+        mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/export")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(enrolledUsername)))
+                .andExpect(content().string(not(containsString(notEnrolledUsername))));
     }
 
     private String login(String username, String password) throws Exception {
@@ -324,11 +556,13 @@ class ExperimentCourseIntegrationTests {
                 .andReturn();
         String body = result.getResponse().getContentAsString();
         long semesterId = ((Number) JsonPath.read(body, "$.data.semesters[0].id")).longValue();
+        String semesterStartDate = JsonPath.read(body, "$.data.semesters[0].startDate");
+        String semesterEndDate = JsonPath.read(body, "$.data.semesters[0].endDate");
         long slotId = ((Number) JsonPath.read(body, "$.data.timeSlots[0].id")).longValue();
         long labRoomId = ((Number) JsonPath.read(body, "$.data.labRooms[0].id")).longValue();
-        return new TeacherMeta(semesterId, slotId, labRoomId);
+        return new TeacherMeta(semesterId, slotId, labRoomId, LocalDate.parse(semesterStartDate), LocalDate.parse(semesterEndDate));
     }
 
-    private record TeacherMeta(Long semesterId, Long slotId, Long labRoomId) {
+    private record TeacherMeta(Long semesterId, Long slotId, Long labRoomId, LocalDate semesterStartDate, LocalDate semesterEndDate) {
     }
 }

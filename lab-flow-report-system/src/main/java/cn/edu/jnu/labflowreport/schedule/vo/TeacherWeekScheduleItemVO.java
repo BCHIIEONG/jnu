@@ -7,6 +7,10 @@ import lombok.Data;
 @Data
 public class TeacherWeekScheduleItemVO {
     private Long id;
+    private String sourceType;
+    private Long experimentCourseId;
+    private Long experimentCourseSlotId;
+    private Long experimentCourseInstanceId;
     private Long semesterId;
     private Long classId;
     private String className;
@@ -22,4 +26,3 @@ public class TeacherWeekScheduleItemVO {
     private LocalTime slotEndTime;
     private String courseName;
 }
-

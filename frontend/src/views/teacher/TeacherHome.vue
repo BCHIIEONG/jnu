@@ -57,8 +57,10 @@ type WeekScheduleItem = {
   id: number
   sourceType?: 'CLASS_SCHEDULE' | 'EXPERIMENT_COURSE'
   experimentCourseId?: number | null
+  experimentCourseSlotId?: number | null
+  experimentCourseInstanceId?: number | null
   semesterId: number
-  classId: number
+  classId?: number | null
   className: string
   labRoomName?: string | null
   lessonDate: string
@@ -69,10 +71,14 @@ type WeekScheduleItem = {
 type RosterStudent = { id: number; username: string; displayName: string }
 type AttendanceSession = {
   id: number
+  sourceType?: 'CLASS_SCHEDULE' | 'EXPERIMENT_COURSE'
   scheduleId?: number | null
   semesterId: number
-  classId: number
+  classId?: number | null
   teacherId: number
+  experimentCourseId?: number | null
+  experimentCourseSlotId?: number | null
+  experimentCourseInstanceId?: number | null
   status: string
   startedAt: string
   endedAt?: string | null
@@ -89,10 +95,32 @@ type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: 
 type AttendanceStaticCodeVO = { code: string }
 type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
 type MetaOptionVO = { id: number; name: string }
+type SemesterMetaOptionVO = { id: number; name: string; startDate: string; endDate: string }
+type ExperimentCourseSlotInstanceVO = {
+  id: number
+  slotGroupId: number
+  lessonDate: string
+  teachingWeek: number
+  displayName: string
+  slotId: number
+  slotCode?: string | null
+  slotName: string
+  slotStartTime?: string | null
+  slotEndTime?: string | null
+  labRoomId: number
+  labRoomName?: string | null
+  capacity: number
+}
 type ExperimentCourseSlotVO = {
   id: number
   courseId: number
-  lessonDate: string
+  name?: string | null
+  mode: 'SINGLE' | 'RECURRING'
+  firstLessonDate: string
+  repeatPattern?: 'EVERY_WEEK' | 'ODD_WEEK' | null
+  rangeMode?: 'SEMESTER' | 'DATE_RANGE' | null
+  rangeStartDate?: string | null
+  rangeEndDate?: string | null
   slotId: number
   slotCode?: string | null
   slotName: string
@@ -103,6 +131,7 @@ type ExperimentCourseSlotVO = {
   capacity: number
   enrolledCount: number
   remainingCapacity: number
+  instances: ExperimentCourseSlotInstanceVO[]
 }
 type ExperimentCourseVO = {
   id: number
@@ -142,17 +171,36 @@ type ExperimentCourseStudentOptionVO = {
   classDisplayName?: string | null
 }
 type ExperimentCourseMetaVO = {
-  semesters: MetaOptionVO[]
+  semesters: SemesterMetaOptionVO[]
   timeSlots: MetaOptionVO[]
   labRooms: MetaOptionVO[]
+}
+type ExperimentCourseFormSlot = {
+  id?: number
+  name: string
+  mode: 'SINGLE' | 'RECURRING'
+  firstLessonDate: string
+  slotId: number | null
+  labRoomId: number | null
+  capacity: number
+  repeatPattern: 'EVERY_WEEK' | 'ODD_WEEK'
+  rangeMode: 'SEMESTER' | 'DATE_RANGE'
+  rangeStartDate: string
+  rangeEndDate: string
+  configured: boolean
+  previewExpanded: boolean
 }
 type PageResult<T> = { page: number; size: number; total: number; items: T[] }
 type AttendanceHistoryItem = {
   sessionId: number
+  sourceType?: 'CLASS_SCHEDULE' | 'EXPERIMENT_COURSE'
   courseName: string
-  classId: number
+  classId?: number | null
   classDisplayName: string
   grade?: number | null
+  experimentCourseId?: number | null
+  experimentCourseSlotId?: number | null
+  experimentCourseInstanceId?: number | null
   labRoomName?: string | null
   lessonDate?: string | null
   slotName?: string | null
@@ -313,6 +361,7 @@ const loadingExperimentCourseMeta = ref(false)
 const togglingExperimentCourseId = ref<number | null>(null)
 const loadingCourseEnrollments = ref(false)
 const experimentCourseEnrollments = ref<ExperimentCourseEnrollmentRowVO[]>([])
+const experimentCourseDetailExpanded = reactive<Record<number, boolean>>({})
 const experimentCourseForm = reactive({
   title: '',
   description: '',
@@ -320,10 +369,8 @@ const experimentCourseForm = reactive({
   enrollDeadlineAt: null as string | null,
   targetClassIds: [] as number[],
   targetStudentIds: [] as number[],
-  slots: [{ lessonDate: '', slotId: null as number | null, labRoomId: null as number | null, capacity: 1 }],
+  slots: [] as ExperimentCourseFormSlot[],
 })
-const historyClassOptions = ref<TeacherClassVO[]>([])
-const loadingHistoryClasses = ref(false)
 
 const reviewDialog = ref(false)
 const reviewTarget = ref<SubmissionVO | null>(null)
@@ -1183,6 +1230,149 @@ async function searchExperimentCourseStudents(query = '') {
   }
 }
 
+function createExperimentCourseSlot(): ExperimentCourseFormSlot {
+  return {
+    name: '',
+    mode: 'SINGLE',
+    firstLessonDate: '',
+    slotId: null,
+    labRoomId: null,
+    capacity: 1,
+    repeatPattern: 'EVERY_WEEK',
+    rangeMode: 'SEMESTER',
+    rangeStartDate: '',
+    rangeEndDate: '',
+    configured: false,
+    previewExpanded: false,
+  }
+}
+
+function selectedExperimentSemester() {
+  return experimentCourseMeta.value.semesters.find((item) => item.id === experimentCourseForm.semesterId) ?? null
+}
+
+function parseLocalDate(value: string) {
+  const parsed = new Date(`${value}T12:00:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function toDateString(date: Date) {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function mondayOf(date: Date) {
+  const copy = new Date(date)
+  const day = copy.getDay()
+  const offset = (day + 6) % 7
+  copy.setDate(copy.getDate() - offset)
+  return copy
+}
+
+function computeTeachingWeek(dateText: string, semester: SemesterMetaOptionVO | null) {
+  if (!semester) return 1
+  const lesson = parseLocalDate(dateText)
+  const semesterStart = parseLocalDate(semester.startDate)
+  if (!lesson || !semesterStart) return 1
+  const diff = mondayOf(lesson).getTime() - mondayOf(semesterStart).getTime()
+  return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1
+}
+
+function repeatPatternStepDays(repeatPattern: ExperimentCourseFormSlot['repeatPattern']) {
+  return repeatPattern === 'ODD_WEEK' ? 14 : 7
+}
+
+function defaultSlotBaseName(slot: Pick<ExperimentCourseFormSlot, 'name'>, index: number) {
+  const name = slot.name.trim()
+  return name || `场次${index + 1}`
+}
+
+function buildExperimentCoursePreview(slot: ExperimentCourseFormSlot, index: number) {
+  if (!slot.firstLessonDate || !slot.slotId || !slot.labRoomId || !slot.capacity) return []
+  const semester = selectedExperimentSemester()
+  const first = parseLocalDate(slot.firstLessonDate)
+  if (!semester || !first) return []
+  const baseName = defaultSlotBaseName(slot, index)
+  if (first < parseLocalDate(semester.startDate)! || first > parseLocalDate(semester.endDate)!) return []
+  if (slot.mode === 'SINGLE') {
+    const week = computeTeachingWeek(slot.firstLessonDate, semester)
+    return [{
+      lessonDate: slot.firstLessonDate,
+      teachingWeek: week,
+      displayName: `${baseName} 第1周`,
+    }]
+  }
+  const rangeStartText = slot.rangeMode === 'SEMESTER' ? semester.startDate : slot.rangeStartDate
+  const rangeEndText = slot.rangeMode === 'SEMESTER' ? semester.endDate : slot.rangeEndDate
+  const rangeStart = parseLocalDate(rangeStartText)
+  const rangeEnd = parseLocalDate(rangeEndText)
+  if (!rangeStart || !rangeEnd) return []
+  if (rangeStart < parseLocalDate(semester.startDate)! || rangeEnd > parseLocalDate(semester.endDate)!) return []
+  if (first < rangeStart || first > rangeEnd) return []
+  const items: { lessonDate: string; teachingWeek: number; displayName: string }[] = []
+  const stepDays = repeatPatternStepDays(slot.repeatPattern)
+  for (let current = new Date(first); current <= rangeEnd; current.setDate(current.getDate() + stepDays)) {
+    if (current < rangeStart) continue
+    const lessonDate = toDateString(current)
+    const teachingWeek = computeTeachingWeek(lessonDate, semester)
+    items.push({
+      lessonDate,
+      teachingWeek,
+      displayName: `${baseName} 第${items.length + 1}周`,
+    })
+  }
+  return items
+}
+
+function getExperimentCourseSlotIssue(slot: ExperimentCourseFormSlot, index: number) {
+  if (!slot.firstLessonDate || !slot.slotId || !slot.labRoomId || !slot.capacity || slot.capacity < 1) {
+    return '请完整填写场次日期、节次、地点和人数'
+  }
+  const semester = selectedExperimentSemester()
+  if (!semester) return '请选择有效学期'
+  const semesterStart = parseLocalDate(semester.startDate)
+  const semesterEnd = parseLocalDate(semester.endDate)
+  const first = parseLocalDate(slot.firstLessonDate)
+  if (!semesterStart || !semesterEnd || !first) return '学期或首次上课日期格式错误'
+  if (first < semesterStart || first > semesterEnd) return '首次上课日期不在所选学期内'
+  if (slot.mode === 'SINGLE') return null
+  const rangeStartText = slot.rangeMode === 'SEMESTER' ? semester.startDate : slot.rangeStartDate
+  const rangeEndText = slot.rangeMode === 'SEMESTER' ? semester.endDate : slot.rangeEndDate
+  const rangeStart = parseLocalDate(rangeStartText)
+  const rangeEnd = parseLocalDate(rangeEndText)
+  if (!rangeStart || !rangeEnd) return '请完整填写多次课的日期范围'
+  if (rangeStart > rangeEnd) return '日期区间开始时间不能晚于结束时间'
+  if (rangeStart < semesterStart || rangeEnd > semesterEnd) return '多次课的日期范围必须位于所选学期内'
+  if (first < rangeStart || first > rangeEnd) return '首次上课日期必须位于多次课生效范围内'
+  if (buildExperimentCoursePreview(slot, index).length === 0) return '当前场次规则没有生成可用课次，请检查日期范围'
+  return null
+}
+
+function formatWeekday(dateText: string) {
+  const parsed = parseLocalDate(dateText)
+  return parsed ? ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][parsed.getDay()] : '-'
+}
+
+function previewSlotSummary(slot: ExperimentCourseFormSlot, index: number) {
+  const baseName = defaultSlotBaseName(slot, index)
+  if (slot.mode === 'SINGLE') return `${baseName} / 单次课`
+  const repeatLabel = slot.repeatPattern === 'ODD_WEEK' ? '单周' : '每周'
+  const rangeLabel = slot.rangeMode === 'SEMESTER' ? '整学期' : '自定义区间'
+  return `${baseName} / 多次课 / ${repeatLabel} / ${rangeLabel}`
+}
+
+function finalizeExperimentCourseSlot(slot: ExperimentCourseFormSlot, index: number) {
+  const issue = getExperimentCourseSlotIssue(slot, index)
+  if (issue) {
+    ElMessage.warning(issue)
+    return
+  }
+  slot.configured = true
+  slot.previewExpanded = true
+}
+
 function resetExperimentCourseForm() {
   editingExperimentCourseId.value = null
   experimentCourseForm.title = ''
@@ -1191,7 +1381,7 @@ function resetExperimentCourseForm() {
   experimentCourseForm.enrollDeadlineAt = null
   experimentCourseForm.targetClassIds = []
   experimentCourseForm.targetStudentIds = []
-  experimentCourseForm.slots = [{ lessonDate: '', slotId: null, labRoomId: null, capacity: 1 }]
+  experimentCourseForm.slots = [createExperimentCourseSlot()]
 }
 
 function fillExperimentCourseForm(course: ExperimentCourseVO) {
@@ -1203,10 +1393,19 @@ function fillExperimentCourseForm(course: ExperimentCourseVO) {
   experimentCourseForm.targetClassIds = [...(course.targetClassIds || [])]
   experimentCourseForm.targetStudentIds = [...(course.targetStudentIds || [])]
   experimentCourseForm.slots = (course.slots || []).map((slot) => ({
-    lessonDate: slot.lessonDate,
+    id: slot.id,
+    name: slot.name ?? '',
+    mode: slot.mode ?? 'SINGLE',
+    firstLessonDate: slot.firstLessonDate,
     slotId: slot.slotId,
     labRoomId: slot.labRoomId,
     capacity: slot.capacity,
+    repeatPattern: slot.repeatPattern ?? 'EVERY_WEEK',
+    rangeMode: slot.rangeMode ?? 'SEMESTER',
+    rangeStartDate: slot.rangeStartDate ?? slot.firstLessonDate,
+    rangeEndDate: slot.rangeEndDate ?? slot.firstLessonDate,
+    configured: true,
+    previewExpanded: false,
   }))
 }
 
@@ -1227,7 +1426,7 @@ async function openEditExperimentCourseDialog(course: ExperimentCourseVO) {
 }
 
 function addExperimentCourseSlot() {
-  experimentCourseForm.slots.push({ lessonDate: '', slotId: null, labRoomId: null, capacity: 1 })
+  experimentCourseForm.slots.push(createExperimentCourseSlot())
 }
 
 function removeExperimentCourseSlot(index: number) {
@@ -1296,8 +1495,10 @@ async function saveExperimentCourse() {
     ElMessage.warning('请选择截止选课时间')
     return
   }
-  if (experimentCourseForm.slots.some((slot) => !slot.lessonDate || !slot.slotId || !slot.labRoomId || !slot.capacity || slot.capacity < 1)) {
-    ElMessage.warning('请完整填写所有场次')
+  const firstInvalidSlot = experimentCourseForm.slots.find((slot, index) => getExperimentCourseSlotIssue(slot, index))
+  if (firstInvalidSlot) {
+    const slotIndex = experimentCourseForm.slots.indexOf(firstInvalidSlot)
+    ElMessage.warning(`场次${slotIndex + 1}：${getExperimentCourseSlotIssue(firstInvalidSlot, slotIndex)}`)
     return
   }
   savingExperimentCourse.value = true
@@ -1310,10 +1511,17 @@ async function saveExperimentCourse() {
       targetClassIds: experimentCourseForm.targetClassIds,
       targetStudentIds: experimentCourseForm.targetStudentIds,
       slots: experimentCourseForm.slots.map((slot) => ({
-        lessonDate: slot.lessonDate,
+        id: slot.id,
+        name: slot.name || null,
+        mode: slot.mode,
+        firstLessonDate: slot.firstLessonDate,
         slotId: slot.slotId,
         labRoomId: slot.labRoomId,
         capacity: slot.capacity,
+        repeatPattern: slot.mode === 'RECURRING' ? slot.repeatPattern : null,
+        rangeMode: slot.mode === 'RECURRING' ? slot.rangeMode : null,
+        rangeStartDate: slot.mode === 'RECURRING' && slot.rangeMode === 'DATE_RANGE' ? slot.rangeStartDate : null,
+        rangeEndDate: slot.mode === 'RECURRING' && slot.rangeMode === 'DATE_RANGE' ? slot.rangeEndDate : null,
       })),
     }
     const saved = await apiData<ExperimentCourseVO>(
@@ -1356,26 +1564,9 @@ async function toggleExperimentCourseStatus(course: ExperimentCourseVO) {
   }
 }
 
-async function loadHistoryClassOptions() {
-  loadingHistoryClasses.value = true
-  try {
-    historyClassOptions.value = await apiData<TeacherClassVO[]>(
-      '/api/teacher/classes?scope=schedule',
-      { method: 'GET' },
-      auth.token,
-    )
-  } catch (e: any) {
-    historyClassOptions.value = []
-    ElMessage.error(e?.message ?? '加载历史签到班级失败')
-  } finally {
-    loadingHistoryClasses.value = false
-  }
-}
-
 function buildHistoryQuery() {
   const q = new URLSearchParams()
-  if (historyFilter.grade) q.set('grade', String(historyFilter.grade))
-  if (historyFilter.classId) q.set('classId', String(historyFilter.classId))
+  q.set('sourceType', 'EXPERIMENT_COURSE')
   if (historyFilter.roomKeyword.trim()) q.set('roomKeyword', historyFilter.roomKeyword.trim())
   if (historyFilter.from) q.set('from', historyFilter.from)
   if (historyFilter.to) q.set('to', historyFilter.to)
@@ -1389,11 +1580,15 @@ async function loadHistorySessions(resetPage = false) {
   if (resetPage) historyFilter.page = 1
   historyLoading.value = true
   try {
-    historyData.value = await apiData<PageResult<AttendanceHistoryItem>>(
+    const data = await apiData<PageResult<AttendanceHistoryItem>>(
       `/api/teacher/attendance/sessions?${buildHistoryQuery()}`,
       { method: 'GET' },
       auth.token,
     )
+    historyData.value = {
+      ...data,
+      items: (data.items ?? []).filter((item) => item.sourceType === 'EXPERIMENT_COURSE'),
+    }
   } catch (e: any) {
     ElMessage.error(e?.message ?? '加载历史签到失败')
   } finally {
@@ -1714,9 +1909,6 @@ watch(activeTab, async (tab) => {
     return
   }
   if (tab === 'history') {
-    if (historyClassOptions.value.length === 0) {
-      await loadHistoryClassOptions()
-    }
     if (historyData.value.items.length === 0) {
       await loadHistorySessions()
     }
@@ -1825,11 +2017,12 @@ async function loadWeek() {
   loadingWeek.value = true
   scheduleError.value = ''
   try {
-    weekItems.value = await apiData<WeekScheduleItem[]>(
+    const items = await apiData<WeekScheduleItem[]>(
       `/api/teacher/schedule/week?semesterId=${scheduleSemesterId.value}&weekStartDate=${encodeURIComponent(weekStartDate.value)}`,
       { method: 'GET' },
       auth.token,
     )
+    weekItems.value = (items ?? []).filter((item) => item.sourceType === 'EXPERIMENT_COURSE')
   } catch (e: any) {
     weekItems.value = []
     scheduleError.value = e?.message ?? '加载课表失败'
@@ -1869,18 +2062,62 @@ async function openClass(item: WeekScheduleItem) {
   await loadRoster()
 }
 
+async function openExperimentCourseInstanceForAttendance(
+  course: ExperimentCourseVO,
+  slot: ExperimentCourseSlotVO,
+  instance: ExperimentCourseSlotInstanceVO,
+) {
+  selectedCell.value = {
+    id: instance.id,
+    sourceType: 'EXPERIMENT_COURSE',
+    experimentCourseId: course.id,
+    experimentCourseSlotId: slot.id,
+    experimentCourseInstanceId: instance.id,
+    semesterId: course.semesterId,
+    classId: null,
+    className: slot.name || `场次${slot.id}`,
+    labRoomName: instance.labRoomName || slot.labRoomName || null,
+    lessonDate: instance.lessonDate,
+    slotId: instance.slotId,
+    slotName: instance.slotName,
+    courseName: course.title,
+  }
+  classDialog.value = true
+  await loadLanIps()
+  stopLoops()
+  session.value = null
+  tokenInfo.value = null
+  qrDataUrl.value = null
+  staticCode.value = null
+  records.value = []
+  await loadRoster()
+}
+
 async function loadRoster() {
   if (!selectedCell.value) return
   loadingRoster.value = true
   try {
-    roster.value = await apiData<RosterStudent[]>(
-      `/api/teacher/classes/${selectedCell.value.classId}/roster`,
-      { method: 'GET' },
-      auth.token,
-    )
+    if (selectedCell.value.sourceType === 'EXPERIMENT_COURSE') {
+      if (!selectedCell.value.experimentCourseSlotId) {
+        roster.value = []
+        ElMessage.error('当前实验课程场次缺少场次信息')
+        return
+      }
+      roster.value = await apiData<RosterStudent[]>(
+        `/api/teacher/experiment-course-slots/${selectedCell.value.experimentCourseSlotId}/roster`,
+        { method: 'GET' },
+        auth.token,
+      )
+    } else {
+      roster.value = await apiData<RosterStudent[]>(
+        `/api/teacher/classes/${selectedCell.value.classId}/roster`,
+        { method: 'GET' },
+        auth.token,
+      )
+    }
   } catch (e: any) {
     roster.value = []
-    ElMessage.error(e?.message ?? '加载班级名册失败')
+    ElMessage.error(e?.message ?? '加载签到名单失败')
   } finally {
     loadingRoster.value = false
   }
@@ -1889,14 +2126,22 @@ async function loadRoster() {
 async function startSession() {
   if (!selectedCell.value) return
   try {
+    const body
+      = selectedCell.value.sourceType === 'EXPERIMENT_COURSE'
+        ? {
+            experimentCourseInstanceId: selectedCell.value.experimentCourseInstanceId,
+            ...(qrMode.value === 'dynamic' ? { tokenTtlSeconds: desiredTokenTtlSeconds() } : {}),
+          }
+        : (
+            qrMode.value === 'dynamic'
+              ? { scheduleId: selectedCell.value.id, tokenTtlSeconds: desiredTokenTtlSeconds() }
+              : { scheduleId: selectedCell.value.id }
+          )
     session.value = await apiData<AttendanceSession>(
       `/api/attendance/sessions`,
       {
         method: 'POST',
-        body:
-          qrMode.value === 'dynamic'
-            ? { scheduleId: selectedCell.value.id, tokenTtlSeconds: desiredTokenTtlSeconds() }
-            : { scheduleId: selectedCell.value.id },
+        body,
       },
       auth.token,
     )
@@ -2198,9 +2443,37 @@ async function copyLink() {
               </template>
               <div class="meta" style="margin-bottom: 8px">截止：{{ experimentCourseDetail.enrollDeadlineAt }} / 状态：{{ experimentCourseDetail.status }}</div>
               <div class="meta" style="margin-bottom: 12px">说明：{{ experimentCourseDetail.description || '（无说明）' }}</div>
-              <div v-for="slot in experimentCourseDetail.slots" :key="slot.id" class="deviceBox" style="margin-bottom: 10px">
-                <div class="deviceTitle">{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}</div>
+              <div v-for="(slot, slotIndex) in experimentCourseDetail.slots" :key="slot.id" class="deviceBox" style="margin-bottom: 10px">
+                <div class="deviceTitle">{{ slot.name || `场次${slotIndex + 1}` }} / {{ slot.mode === 'RECURRING' ? '多次课' : '单次课' }}</div>
+                <div class="meta">
+                  首次上课：{{ slot.firstLessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}
+                  <span v-if="slot.mode === 'RECURRING'">
+                    / {{ slot.repeatPattern === 'ODD_WEEK' ? '单周' : '每周' }}
+                    / {{ slot.rangeMode === 'SEMESTER' ? '整学期' : `${slot.rangeStartDate} ~ ${slot.rangeEndDate}` }}
+                  </span>
+                </div>
                 <div class="meta">容量：{{ slot.capacity }} / 已选：{{ slot.enrolledCount }} / 剩余：{{ slot.remainingCapacity }}</div>
+                <div style="margin-top: 8px">
+                  <el-button size="small" text @click="experimentCourseDetailExpanded[slot.id] = !experimentCourseDetailExpanded[slot.id]">
+                    {{ experimentCourseDetailExpanded[slot.id] ? '收起实例' : `展开实例（${slot.instances.length}）` }}
+                  </el-button>
+                </div>
+                <div v-if="experimentCourseDetailExpanded[slot.id]" class="progressAtts" style="margin-top: 8px">
+                  <div v-for="instance in slot.instances" :key="instance.id" class="progressAtt">
+                    <div class="attName">{{ instance.displayName }}</div>
+                    <div class="meta">{{ instance.lessonDate }} / {{ formatWeekday(instance.lessonDate) }} / {{ instance.slotName }} / {{ instance.labRoomName || '-' }}</div>
+                    <div style="margin-top: 8px">
+                      <el-button
+                        size="small"
+                        type="primary"
+                        plain
+                        @click="openExperimentCourseInstanceForAttendance(experimentCourseDetail, slot, instance)"
+                      >
+                        去签到
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
                 <el-table
                   :data="experimentCourseEnrollments.filter((row) => row.slotId === slot.id)"
                   size="small"
@@ -2679,7 +2952,7 @@ async function copyLink() {
               </div>
 
               <div class="meta" style="margin: 8px 0">
-                点击课表格子进入班级管理页，可开启/结束签到并查看实时名单。
+                这里只显示实验课程课次。点击格子可开启/结束该课次签到，并查看当前场次报名名单与实时签到名单。
               </div>
               <div v-if="scheduleError" class="scheduleEmpty" style="margin: 8px 0">{{ scheduleError }}</div>
               <div v-else-if="scheduleEmptyHint" class="scheduleEmpty" style="margin: 8px 0">当前周暂无课表，请切换周次或学期</div>
@@ -2708,8 +2981,8 @@ async function copyLink() {
                           @click="() => { const it = itemAt(ts.id, d.date); if (it) openClass(it) }"
                         >
                           <template v-if="itemAt(ts.id, d.date)">
-                            <div class="title">{{ itemAt(ts.id, d.date)!.className }}</div>
-                            <div class="meta">{{ itemAt(ts.id, d.date)!.courseName || '（未命名课程）' }}</div>
+                            <div class="title">{{ itemAt(ts.id, d.date)!.courseName || '（未命名课程）' }}</div>
+                            <div class="meta">{{ itemAt(ts.id, d.date)!.className }}</div>
                             <div class="meta">{{ itemAt(ts.id, d.date)!.labRoomName || '-' }}</div>
                           </template>
                           <template v-else>
@@ -2727,10 +3000,6 @@ async function copyLink() {
           <el-tab-pane label="历史签到" name="history">
             <el-card class="block" shadow="never">
               <div class="toolbar">
-                <el-input-number v-model="historyFilter.grade" :min="2000" :max="2100" placeholder="年级" style="width: 140px" />
-                <el-select v-model="historyFilter.classId" clearable filterable :loading="loadingHistoryClasses" placeholder="班级" style="width: 240px">
-                  <el-option v-for="c in historyClassOptions" :key="c.id" :label="c.name" :value="c.id" />
-                </el-select>
                 <el-input v-model="historyFilter.roomKeyword" placeholder="课室关键字" style="width: 180px" />
                 <el-date-picker
                   v-model="historyFilter.from"
@@ -2759,18 +3028,13 @@ async function copyLink() {
               </div>
 
               <div class="meta" style="margin: 8px 0 12px">
-                集中查看历史签到场次，可按班级、年级、课室和时间筛选，并重新下载签到 CSV。
+                这里只显示实验课程签到记录，可按课室、时间和状态筛选，并重新下载签到 CSV。
               </div>
 
               <template v-if="!isMobile">
                 <el-table :data="historyData.items" v-loading="historyLoading" stripe>
                   <el-table-column prop="courseName" label="课程" min-width="140" />
-                  <el-table-column prop="classDisplayName" label="班级" min-width="160" />
-                  <el-table-column label="年级" width="90">
-                    <template #default="{ row }: { row: AttendanceHistoryItem }">
-                      {{ row.grade ? `${row.grade}级` : '-' }}
-                    </template>
-                  </el-table-column>
+                  <el-table-column prop="classDisplayName" label="场次" min-width="180" />
                   <el-table-column prop="labRoomName" label="课室" min-width="120" />
                   <el-table-column label="日期/节次" min-width="170">
                     <template #default="{ row }: { row: AttendanceHistoryItem }">
@@ -2801,7 +3065,7 @@ async function copyLink() {
                   <div class="stuHead">
                     <div>
                       <div class="stuName">{{ row.courseName }}</div>
-                      <div class="meta">{{ row.classDisplayName }}</div>
+                      <div class="meta">{{ row.classDisplayName }} / {{ row.slotName || '-' }}</div>
                     </div>
                     <el-tag size="small" :type="row.status === 'OPEN' ? 'success' : 'info'">{{ row.status }}</el-tag>
                   </div>
@@ -3005,7 +3269,12 @@ async function copyLink() {
               <el-button size="small" type="danger" plain @click="removeExperimentCourseSlot(index)">删除场次</el-button>
             </div>
             <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
-              <el-date-picker v-model="slot.lessonDate" type="date" value-format="YYYY-MM-DD" placeholder="日期" style="width: 100%" />
+              <el-input v-model="slot.name" placeholder="场次名称（可选）" />
+              <el-radio-group v-model="slot.mode">
+                <el-radio-button label="SINGLE">单次课</el-radio-button>
+                <el-radio-button label="RECURRING">多次课</el-radio-button>
+              </el-radio-group>
+              <el-date-picker v-model="slot.firstLessonDate" type="date" value-format="YYYY-MM-DD" placeholder="首次上课日期" style="width: 100%" />
               <el-select v-model="slot.slotId" placeholder="节次" style="width: 100%">
                 <el-option v-for="item in experimentCourseMeta.timeSlots" :key="item.id" :label="item.name" :value="item.id" />
               </el-select>
@@ -3013,6 +3282,38 @@ async function copyLink() {
                 <el-option v-for="item in experimentCourseMeta.labRooms" :key="item.id" :label="item.name" :value="item.id" />
               </el-select>
               <el-input-number v-model="slot.capacity" :min="1" :max="999" style="width: 100%" />
+            </div>
+            <div v-if="slot.mode === 'RECURRING'" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px">
+              <el-form-item label="重复方式" style="margin-bottom: 0">
+                <el-radio-group v-model="slot.repeatPattern">
+                  <el-radio-button label="EVERY_WEEK">每周</el-radio-button>
+                  <el-radio-button label="ODD_WEEK">单周</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label="生效范围" style="margin-bottom: 0">
+                <el-radio-group v-model="slot.rangeMode">
+                  <el-radio-button label="SEMESTER">整学期</el-radio-button>
+                  <el-radio-button label="DATE_RANGE">自定义日期区间</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <template v-if="slot.rangeMode === 'DATE_RANGE'">
+                <el-date-picker v-model="slot.rangeStartDate" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width: 100%" />
+                <el-date-picker v-model="slot.rangeEndDate" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width: 100%" />
+              </template>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap">
+              <el-button size="small" type="primary" plain @click="finalizeExperimentCourseSlot(slot, index)">完成场次设定</el-button>
+              <el-button size="small" text @click="slot.previewExpanded = !slot.previewExpanded">
+                {{ slot.previewExpanded ? '收起实例预览' : '展开实例预览' }}
+              </el-button>
+              <span class="meta">{{ previewSlotSummary(slot, index) }}</span>
+            </div>
+            <div v-if="slot.previewExpanded" class="progressAtts" style="margin-top: 10px">
+              <div v-for="item in buildExperimentCoursePreview(slot, index)" :key="`${item.lessonDate}-${item.teachingWeek}`" class="progressAtt">
+                <div class="attName">{{ item.displayName }}</div>
+                <div class="meta">{{ item.lessonDate }} / {{ formatWeekday(item.lessonDate) }} / 学期第{{ item.teachingWeek }}周</div>
+              </div>
+              <div v-if="buildExperimentCoursePreview(slot, index).length === 0" class="meta">当前设定尚未生成可用课次</div>
             </div>
           </div>
           <div>
@@ -3192,9 +3493,9 @@ async function copyLink() {
     </div>
   </el-dialog>
 
-  <el-dialog v-model="classDialog" title="班级管理 / 签到" width="980px" @closed="stopLoops">
+  <el-dialog v-model="classDialog" title="实验课程签到" width="980px" @closed="stopLoops">
     <div v-if="selectedCell" class="meta" style="margin-bottom: 10px">
-      {{ selectedCell.lessonDate }} / {{ selectedCell.slotName }} / {{ selectedCell.className }}
+      {{ selectedCell.courseName || '（未命名课程）' }} / {{ selectedCell.className }} / {{ selectedCell.lessonDate }} / {{ selectedCell.slotName }}
       <span style="margin-left: 10px">实验室：{{ selectedCell.labRoomName || '-' }}</span>
     </div>
 
@@ -3266,7 +3567,7 @@ async function copyLink() {
     </el-card>
 
     <el-tabs>
-      <el-tab-pane label="班级名册">
+      <el-tab-pane label="签到名单">
         <el-table :data="roster" v-loading="loadingRoster" stripe height="420">
           <el-table-column prop="username" label="学号/账号" width="160" />
           <el-table-column prop="displayName" label="姓名" width="140" />

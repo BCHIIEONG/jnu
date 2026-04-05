@@ -28,7 +28,13 @@ public class ExperimentCourseVO {
     public static class SlotVO {
         private Long id;
         private Long courseId;
-        private LocalDate lessonDate;
+        private String name;
+        private String mode;
+        private LocalDate firstLessonDate;
+        private String repeatPattern;
+        private String rangeMode;
+        private LocalDate rangeStartDate;
+        private LocalDate rangeEndDate;
         private Long slotId;
         private String slotCode;
         private String slotName;
@@ -39,5 +45,23 @@ public class ExperimentCourseVO {
         private Integer capacity;
         private Integer enrolledCount;
         private Integer remainingCapacity;
+        private List<InstanceVO> instances;
+    }
+
+    @Data
+    public static class InstanceVO {
+        private Long id;
+        private Long slotGroupId;
+        private LocalDate lessonDate;
+        private Integer teachingWeek;
+        private String displayName;
+        private Long slotId;
+        private String slotCode;
+        private String slotName;
+        private LocalTime slotStartTime;
+        private LocalTime slotEndTime;
+        private Long labRoomId;
+        private String labRoomName;
+        private Integer capacity;
     }
 }

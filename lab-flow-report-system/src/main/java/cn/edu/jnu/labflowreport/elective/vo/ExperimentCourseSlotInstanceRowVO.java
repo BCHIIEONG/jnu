@@ -3,16 +3,13 @@ package cn.edu.jnu.labflowreport.elective.vo;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
-public record ExperimentCourseSlotRowVO(
+public record ExperimentCourseSlotInstanceRowVO(
         Long id,
         Long courseId,
-        String name,
-        String mode,
-        LocalDate firstLessonDate,
-        String repeatPattern,
-        String rangeMode,
-        LocalDate rangeStartDate,
-        LocalDate rangeEndDate,
+        Long slotGroupId,
+        LocalDate lessonDate,
+        Integer teachingWeek,
+        String displayName,
         Long slotId,
         String slotCode,
         String slotName,
@@ -20,7 +17,6 @@ public record ExperimentCourseSlotRowVO(
         LocalTime slotEndTime,
         Long labRoomId,
         String labRoomName,
-        Integer capacity,
-        Integer enrolledCount
+        Integer capacity
 ) {
 }

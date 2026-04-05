@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
+import { ApiError } from '../api/http'
 
 import LoginView from '../views/LoginView.vue'
 import StudentHome from '../views/student/StudentHome.vue'
@@ -42,6 +43,10 @@ router.beforeEach(async (to) => {
   try {
     await auth.ensureMe()
   } catch (e) {
+    if (e instanceof ApiError && e.status !== 401 && e.status !== 403) {
+      ElMessage.error(e.message)
+      return false
+    }
     auth.logout()
     ElMessage.error('登录已失效，请重新登录')
     return { path: '/login', query: { redirect: to.fullPath } }

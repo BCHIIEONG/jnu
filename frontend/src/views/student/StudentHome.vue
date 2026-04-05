@@ -138,7 +138,13 @@ type WeekScheduleItem = {
 type ExperimentCourseSlotVO = {
   id: number
   courseId: number
-  lessonDate: string
+  name?: string | null
+  mode: 'SINGLE' | 'RECURRING'
+  firstLessonDate: string
+  repeatPattern?: 'EVERY_WEEK' | 'ODD_WEEK' | null
+  rangeMode?: 'SEMESTER' | 'DATE_RANGE' | null
+  rangeStartDate?: string | null
+  rangeEndDate?: string | null
   slotId: number
   slotCode?: string | null
   slotName: string
@@ -149,6 +155,21 @@ type ExperimentCourseSlotVO = {
   capacity: number
   enrolledCount: number
   remainingCapacity: number
+  instances: {
+    id: number
+    slotGroupId: number
+    lessonDate: string
+    teachingWeek: number
+    displayName: string
+    slotId: number
+    slotCode?: string | null
+    slotName: string
+    slotStartTime?: string | null
+    slotEndTime?: string | null
+    labRoomId: number
+    labRoomName?: string | null
+    capacity: number
+  }[]
 }
 type StudentExperimentCourseVO = {
   id: number
@@ -289,6 +310,16 @@ function formatWeekdayLabel(date: string): string {
   const parsed = new Date(`${date}T00:00:00`)
   const labels = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
   return labels[parsed.getDay()] ?? date
+}
+
+function experimentCourseSlotSummary(slot: ExperimentCourseSlotVO, index = 0): string {
+  const baseName = slot.name?.trim() || `场次${index + 1}`
+  if (slot.mode === 'SINGLE') {
+    return `${baseName} / 单次课`
+  }
+  const repeatLabel = slot.repeatPattern === 'ODD_WEEK' ? '单周' : '每周'
+  const rangeLabel = slot.rangeMode === 'SEMESTER' ? '整学期' : `${slot.rangeStartDate} ~ ${slot.rangeEndDate}`
+  return `${baseName} / 多次课 / ${repeatLabel} / ${rangeLabel}`
 }
 
 const weekDays = computed(() => {
@@ -1272,10 +1303,14 @@ onMounted(async () => {
             <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
             <div class="meta" v-if="course.description">{{ course.description }}</div>
             <div class="progressAtts" style="margin-top: 10px">
-              <div v-for="slot in course.slots" :key="slot.id" class="progressAtt">
-                <div class="attName">{{ slot.lessonDate }} {{ slot.slotName }}</div>
-                <div class="meta">{{ slot.labRoomName || '-' }}</div>
+              <div v-for="(slot, slotIndex) in course.slots" :key="slot.id" class="progressAtt">
+                <div class="attName">{{ experimentCourseSlotSummary(slot, slotIndex) }}</div>
+                <div class="meta">首次上课：{{ slot.firstLessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}</div>
                 <div class="meta">剩余名额：{{ slot.remainingCapacity }}</div>
+                <div class="meta" v-for="instance in slot.instances.slice(0, 3)" :key="instance.id">
+                  {{ instance.displayName }} / {{ instance.lessonDate }} / {{ formatWeekdayLabel(instance.lessonDate) }}
+                </div>
+                <div class="meta" v-if="slot.instances.length > 3">共 {{ slot.instances.length }} 次课</div>
                 <el-button
                   size="small"
                   type="primary"
@@ -1302,13 +1337,12 @@ onMounted(async () => {
             </div>
             <div class="meta" style="margin-top: 6px">教师：{{ course.teacherDisplayName || '-' }}</div>
             <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
-            <div
-              v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)"
-              :key="slot.id"
-              class="meta"
-              style="margin-top: 6px"
-            >
-              已选场次：{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}
+            <div v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)" :key="slot.id" style="margin-top: 6px">
+              <div class="meta">已选场次：{{ experimentCourseSlotSummary(slot) }}</div>
+              <div class="meta">地点节次：{{ slot.labRoomName || '-' }} / {{ slot.slotName }}</div>
+              <div class="meta" v-for="instance in slot.instances" :key="instance.id">
+                {{ instance.displayName }} / {{ instance.lessonDate }} / {{ formatWeekdayLabel(instance.lessonDate) }}
+              </div>
             </div>
           </el-card>
         </el-card>
@@ -1617,10 +1651,14 @@ onMounted(async () => {
                   <div class="meta">教师：{{ course.teacherDisplayName || '-' }}</div>
                   <div class="meta">截止：{{ course.enrollDeadlineAt }}</div>
                   <div class="meta" v-if="course.description">{{ course.description }}</div>
-                  <div v-for="slot in course.slots" :key="slot.id" class="progressAtt" style="margin-top: 10px">
-                    <div class="attName">{{ slot.lessonDate }} {{ slot.slotName }}</div>
-                    <div class="meta">{{ slot.labRoomName || '-' }}</div>
+                  <div v-for="(slot, slotIndex) in course.slots" :key="slot.id" class="progressAtt" style="margin-top: 10px">
+                    <div class="attName">{{ experimentCourseSlotSummary(slot, slotIndex) }}</div>
+                    <div class="meta">首次上课：{{ slot.firstLessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}</div>
                     <div class="meta">剩余名额：{{ slot.remainingCapacity }}</div>
+                    <div class="meta" v-for="instance in slot.instances.slice(0, 3)" :key="instance.id">
+                      {{ instance.displayName }} / {{ instance.lessonDate }} / {{ formatWeekdayLabel(instance.lessonDate) }}
+                    </div>
+                    <div class="meta" v-if="slot.instances.length > 3">共 {{ slot.instances.length }} 次课</div>
                     <el-button
                       size="small"
                       type="primary"
@@ -1644,13 +1682,12 @@ onMounted(async () => {
                 <div v-for="course in myCourses" :key="course.id" class="deviceBox">
                   <div class="progressTitle">{{ course.title }}</div>
                   <div class="meta">教师：{{ course.teacherDisplayName || '-' }}</div>
-                  <div
-                    v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)"
-                    :key="slot.id"
-                    class="meta"
-                    style="margin-top: 6px"
-                  >
-                    场次：{{ slot.lessonDate }} {{ slot.slotName }} / {{ slot.labRoomName || '-' }}
+                  <div v-for="slot in course.slots.filter((item) => item.id === course.selectedSlotId)" :key="slot.id" style="margin-top: 6px">
+                    <div class="meta">场次：{{ experimentCourseSlotSummary(slot) }}</div>
+                    <div class="meta">地点节次：{{ slot.labRoomName || '-' }} / {{ slot.slotName }}</div>
+                    <div class="meta" v-for="instance in slot.instances" :key="instance.id">
+                      {{ instance.displayName }} / {{ instance.lessonDate }} / {{ formatWeekdayLabel(instance.lessonDate) }}
+                    </div>
                   </div>
                 </div>
               </div>

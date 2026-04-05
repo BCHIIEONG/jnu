@@ -22,6 +22,7 @@ export class ApiError extends Error {
 const DEFAULT_API_BASE = '/api'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? DEFAULT_API_BASE
+const BACKEND_UNAVAILABLE_MESSAGE = '后端服务不可用，请确认 8080 已启动'
 
 function buildUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) return path
@@ -34,7 +35,7 @@ async function parseJsonOrThrow<T>(res: Response): Promise<ApiResponse<T>> {
   const text = await res.text()
   const contentType = res.headers.get('content-type') ?? ''
   if (!contentType.includes('application/json')) {
-    throw new ApiError({ status: res.status, message: `Unexpected content-type: ${contentType}` })
+    throw new ApiError({ status: res.status, message: describeNonJsonApiResponse(res.status, contentType, text) })
   }
   const body = (text ? JSON.parse(text) : {}) as ApiResponse<T>
   if (!res.ok || (typeof body.code === 'number' && body.code !== 0)) {
@@ -46,6 +47,22 @@ async function parseJsonOrThrow<T>(res: Response): Promise<ApiResponse<T>> {
     })
   }
   return body
+}
+
+function describeNonJsonApiResponse(status: number, contentType: string, text: string): string {
+  const normalizedContentType = contentType || 'unknown'
+  if (status >= 500 && normalizedContentType.startsWith('text/plain') && !text.trim()) {
+    return BACKEND_UNAVAILABLE_MESSAGE
+  }
+  return `接口返回格式异常（content-type: ${normalizedContentType}）`
+}
+
+function normalizeFetchError(error: unknown): never {
+  if (error instanceof ApiError) throw error
+  if (error instanceof TypeError) {
+    throw new ApiError({ status: 0, message: BACKEND_UNAVAILABLE_MESSAGE })
+  }
+  throw error
 }
 
 export async function apiData<T>(
@@ -62,13 +79,17 @@ export async function apiData<T>(
     body = JSON.stringify(init.body)
   }
 
-  const res = await fetch(buildUrl(path), {
-    method: init.method,
-    headers,
-    body,
-  })
-  const json = await parseJsonOrThrow<T>(res)
-  return json.data
+  try {
+    const res = await fetch(buildUrl(path), {
+      method: init.method,
+      headers,
+      body,
+    })
+    const json = await parseJsonOrThrow<T>(res)
+    return json.data
+  } catch (error) {
+    normalizeFetchError(error)
+  }
 }
 
 function parseFilenameFromContentDisposition(value: string | null): string | null {
@@ -142,14 +163,18 @@ export async function uploadFormData<T>(
   path: string,
   opts: { token: string; formData: FormData },
 ): Promise<T> {
-  const res = await fetch(buildUrl(path), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${opts.token}`,
-      // Do not set Content-Type manually; browser will set boundary.
-    },
-    body: opts.formData,
-  })
-  const json = await parseJsonOrThrow<T>(res)
-  return json.data
+  try {
+    const res = await fetch(buildUrl(path), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.token}`,
+        // Do not set Content-Type manually; browser will set boundary.
+      },
+      body: opts.formData,
+    })
+    const json = await parseJsonOrThrow<T>(res)
+    return json.data
+  } catch (error) {
+    normalizeFetchError(error)
+  }
 }

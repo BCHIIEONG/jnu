@@ -13,7 +13,9 @@ import org.apache.ibatis.annotations.Select;
 public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEntity> {
 
     @Select("""
-            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
+            SELECT id, source_type, schedule_id, semester_id, class_id, teacher_id,
+                   experiment_course_id, experiment_course_slot_id, experiment_course_instance_id,
+                   status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
             FROM attendance_session
             WHERE schedule_id = #{scheduleId} AND status = 'OPEN'
             ORDER BY started_at DESC, id DESC
@@ -22,11 +24,14 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
     AttendanceSessionEntity findOpenByScheduleId(Long scheduleId);
 
     @Select("""
-            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
+            SELECT id, source_type, schedule_id, semester_id, class_id, teacher_id,
+                   experiment_course_id, experiment_course_slot_id, experiment_course_instance_id,
+                   status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
             FROM attendance_session
             WHERE semester_id = #{semesterId}
               AND class_id = #{classId}
               AND teacher_id = #{teacherId}
+              AND source_type = 'CLASS_SCHEDULE'
               AND status = 'OPEN'
             ORDER BY started_at DESC, id DESC
             LIMIT 1
@@ -34,7 +39,9 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
     AttendanceSessionEntity findOpenByKey(Long semesterId, Long classId, Long teacherId);
 
     @Select("""
-            SELECT id, schedule_id, semester_id, class_id, teacher_id, status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
+            SELECT id, source_type, schedule_id, semester_id, class_id, teacher_id,
+                   experiment_course_id, experiment_course_slot_id, experiment_course_instance_id,
+                   status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
             FROM attendance_session
             WHERE static_code = #{code}
               AND status = 'OPEN'
@@ -44,25 +51,53 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
     AttendanceSessionEntity findOpenByStaticCode(String code);
 
     @Select("""
+            SELECT id, source_type, schedule_id, semester_id, class_id, teacher_id,
+                   experiment_course_id, experiment_course_slot_id, experiment_course_instance_id,
+                   status, static_code, token_ttl_seconds, started_at, ended_at, created_at, updated_at
+            FROM attendance_session
+            WHERE experiment_course_instance_id = #{instanceId}
+              AND source_type = 'EXPERIMENT_COURSE'
+              AND status = 'OPEN'
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """)
+    AttendanceSessionEntity findOpenByExperimentInstanceId(Long instanceId);
+
+    @Select("""
             <script>
             SELECT s.id AS session_id,
-                   COALESCE(cs.course_name, '未命名课程') AS course_name,
+                   s.source_type,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ec.title ELSE COALESCE(cs.course_name, '未命名课程') END AS course_name,
                    s.class_id,
-                   CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_display_name,
-                   c.grade,
-                   r.name AS lab_room_name,
-                   cs.lesson_date,
-                   ts.name AS slot_name,
+                   CASE
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id))
+                     WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                     ELSE c.name
+                   END AS class_display_name,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN NULL ELSE c.grade END AS grade,
+                   s.experiment_course_id,
+                   s.experiment_course_slot_id,
+                   s.experiment_course_instance_id,
+                   COALESCE(exp_room.name, class_room.name) AS lab_room_name,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.lesson_date ELSE cs.lesson_date END AS lesson_date,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.display_name ELSE class_slot.name END AS slot_name,
                    s.started_at,
                    s.ended_at,
                    s.status,
                    COALESCE(rec.checked_in_count, 0) AS checked_in_count,
-                   COALESCE(roster.total_count, 0) AS total_count
+                   CASE
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp_roster.total_count, 0)
+                     ELSE COALESCE(class_roster.total_count, 0)
+                   END AS total_count
             FROM attendance_session s
-            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id
-            LEFT JOIN org_class c ON c.id = s.class_id
-            LEFT JOIN lab_room r ON r.id = cs.lab_room_id
-            LEFT JOIN time_slot ts ON ts.id = cs.slot_id
+            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN org_class c ON c.id = s.class_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id
+            LEFT JOIN time_slot class_slot ON class_slot.id = cs.slot_id
+            LEFT JOIN experiment_course ec ON ec.id = s.experiment_course_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN experiment_course_slot ecs ON ecs.id = s.experiment_course_slot_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id
             LEFT JOIN (
                 SELECT session_id, COUNT(DISTINCT student_id) AS checked_in_count
                 FROM attendance_record
@@ -77,18 +112,28 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                   AND su.class_id IS NOT NULL
                   AND sr.code = 'ROLE_STUDENT'
                 GROUP BY su.class_id
-            ) roster ON roster.class_id = s.class_id
+            ) class_roster ON class_roster.class_id = s.class_id
+            LEFT JOIN (
+                SELECT slot_id, COUNT(*) AS total_count
+                FROM experiment_course_enrollment
+                WHERE status = 'ENROLLED'
+                GROUP BY slot_id
+            ) exp_roster ON exp_roster.slot_id = s.experiment_course_slot_id
             WHERE 1 = 1
             <if test="teacherId != null"> AND s.teacher_id = #{teacherId}</if>
+            <if test="sourceType != null and sourceType != ''"> AND s.source_type = #{sourceType}</if>
             <if test="grade != null">
               AND (
-                c.grade = #{grade}
-                OR (c.grade IS NULL AND c.name LIKE CONCAT(#{grade}, '级%'))
+                s.source_type = 'CLASS_SCHEDULE'
+                AND (
+                  c.grade = #{grade}
+                  OR (c.grade IS NULL AND c.name LIKE CONCAT(#{grade}, '级%'))
+                )
               )
             </if>
-            <if test="classId != null"> AND s.class_id = #{classId}</if>
+            <if test="classId != null"> AND s.source_type = 'CLASS_SCHEDULE' AND s.class_id = #{classId}</if>
             <if test="roomKeyword != null and roomKeyword != ''">
-              AND r.name LIKE CONCAT('%', #{roomKeyword}, '%')
+              AND COALESCE(exp_room.name, class_room.name) LIKE CONCAT('%', #{roomKeyword}, '%')
             </if>
             <if test="from != null"> AND s.started_at <![CDATA[>=]]> #{from}</if>
             <if test="to != null"> AND s.started_at <![CDATA[<=]]> #{to}</if>
@@ -99,6 +144,7 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
             """)
     List<TeacherAttendanceSessionListItemVO> findTeacherHistorySessions(
             @Param("teacherId") Long teacherId,
+            @Param("sourceType") String sourceType,
             @Param("grade") Integer grade,
             @Param("classId") Long classId,
             @Param("roomKeyword") String roomKeyword,
@@ -113,20 +159,26 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
             <script>
             SELECT COUNT(1)
             FROM attendance_session s
-            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id
-            LEFT JOIN org_class c ON c.id = s.class_id
-            LEFT JOIN lab_room r ON r.id = cs.lab_room_id
+            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN org_class c ON c.id = s.class_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id
+            LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id
             WHERE 1 = 1
             <if test="teacherId != null"> AND s.teacher_id = #{teacherId}</if>
+            <if test="sourceType != null and sourceType != ''"> AND s.source_type = #{sourceType}</if>
             <if test="grade != null">
               AND (
-                c.grade = #{grade}
-                OR (c.grade IS NULL AND c.name LIKE CONCAT(#{grade}, '级%'))
+                s.source_type = 'CLASS_SCHEDULE'
+                AND (
+                  c.grade = #{grade}
+                  OR (c.grade IS NULL AND c.name LIKE CONCAT(#{grade}, '级%'))
+                )
               )
             </if>
-            <if test="classId != null"> AND s.class_id = #{classId}</if>
+            <if test="classId != null"> AND s.source_type = 'CLASS_SCHEDULE' AND s.class_id = #{classId}</if>
             <if test="roomKeyword != null and roomKeyword != ''">
-              AND r.name LIKE CONCAT('%', #{roomKeyword}, '%')
+              AND COALESCE(exp_room.name, class_room.name) LIKE CONCAT('%', #{roomKeyword}, '%')
             </if>
             <if test="from != null"> AND s.started_at <![CDATA[>=]]> #{from}</if>
             <if test="to != null"> AND s.started_at <![CDATA[<=]]> #{to}</if>
@@ -135,6 +187,7 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
             """)
     long countTeacherHistorySessions(
             @Param("teacherId") Long teacherId,
+            @Param("sourceType") String sourceType,
             @Param("grade") Integer grade,
             @Param("classId") Long classId,
             @Param("roomKeyword") String roomKeyword,
@@ -145,23 +198,38 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
 
     @Select("""
             SELECT s.id AS session_id,
-                   COALESCE(cs.course_name, '未命名课程') AS course_name,
+                   s.source_type,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ec.title ELSE COALESCE(cs.course_name, '未命名课程') END AS course_name,
                    s.class_id,
-                   CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_display_name,
-                   c.grade,
-                   r.name AS lab_room_name,
-                   cs.lesson_date,
-                   ts.name AS slot_name,
+                   CASE
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id))
+                     WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                     ELSE c.name
+                   END AS class_display_name,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN NULL ELSE c.grade END AS grade,
+                   s.experiment_course_id,
+                   s.experiment_course_slot_id,
+                   s.experiment_course_instance_id,
+                   COALESCE(exp_room.name, class_room.name) AS lab_room_name,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.lesson_date ELSE cs.lesson_date END AS lesson_date,
+                   CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.display_name ELSE class_slot.name END AS slot_name,
                    s.started_at,
                    s.ended_at,
                    s.status,
                    COALESCE(rec.checked_in_count, 0) AS checked_in_count,
-                   COALESCE(roster.total_count, 0) AS total_count
+                   CASE
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp_roster.total_count, 0)
+                     ELSE COALESCE(class_roster.total_count, 0)
+                   END AS total_count
             FROM attendance_session s
-            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id
-            LEFT JOIN org_class c ON c.id = s.class_id
-            LEFT JOIN lab_room r ON r.id = cs.lab_room_id
-            LEFT JOIN time_slot ts ON ts.id = cs.slot_id
+            LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN org_class c ON c.id = s.class_id AND s.source_type = 'CLASS_SCHEDULE'
+            LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id
+            LEFT JOIN time_slot class_slot ON class_slot.id = cs.slot_id
+            LEFT JOIN experiment_course ec ON ec.id = s.experiment_course_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN experiment_course_slot ecs ON ecs.id = s.experiment_course_slot_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'
+            LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id
             LEFT JOIN (
                 SELECT session_id, COUNT(DISTINCT student_id) AS checked_in_count
                 FROM attendance_record
@@ -176,7 +244,13 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                   AND su.class_id IS NOT NULL
                   AND sr.code = 'ROLE_STUDENT'
                 GROUP BY su.class_id
-            ) roster ON roster.class_id = s.class_id
+            ) class_roster ON class_roster.class_id = s.class_id
+            LEFT JOIN (
+                SELECT slot_id, COUNT(*) AS total_count
+                FROM experiment_course_enrollment
+                WHERE status = 'ENROLLED'
+                GROUP BY slot_id
+            ) exp_roster ON exp_roster.slot_id = s.experiment_course_slot_id
             WHERE s.id = #{sessionId}
             LIMIT 1
             """)

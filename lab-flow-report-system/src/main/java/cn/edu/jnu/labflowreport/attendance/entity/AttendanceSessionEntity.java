@@ -12,10 +12,14 @@ public class AttendanceSessionEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String sourceType;
     private Long scheduleId;
     private Long semesterId;
     private Long classId;
     private Long teacherId;
+    private Long experimentCourseId;
+    private Long experimentCourseSlotId;
+    private Long experimentCourseInstanceId;
     private String status;
     private String staticCode;
     private Integer tokenTtlSeconds;

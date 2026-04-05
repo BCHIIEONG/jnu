@@ -29,6 +29,7 @@ public class TeacherAttendanceController {
 
     @GetMapping("/sessions")
     public ApiResponse<PageResult<TeacherAttendanceSessionListItemVO>> listSessions(
+            @RequestParam(required = false) String sourceType,
             @RequestParam(required = false) Integer grade,
             @RequestParam(required = false) Long classId,
             @RequestParam(required = false) String roomKeyword,
@@ -39,7 +40,7 @@ public class TeacherAttendanceController {
             @RequestParam(defaultValue = "20") int size
     ) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        return ApiResponse.success(attendanceService.listTeacherSessions(actor, grade, classId, roomKeyword, from, to, status, page, size));
+        return ApiResponse.success(attendanceService.listTeacherSessions(actor, sourceType, grade, classId, roomKeyword, from, to, status, page, size));
     }
 
     @GetMapping("/sessions/{sessionId}/detail")
