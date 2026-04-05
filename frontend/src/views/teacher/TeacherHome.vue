@@ -8,6 +8,7 @@ import UiModeToggle from '../common/UiModeToggle.vue'
 import { useUiStore } from '../../stores/ui'
 import QRCode from 'qrcode'
 import PlagiarismSummaryPanel from './components/PlagiarismSummaryPanel.vue'
+import LabRoomManager from '../common/LabRoomManager.vue'
 
 type TaskVO = {
   id: number
@@ -94,7 +95,7 @@ type AttendanceRecord = {
 type AttendanceTokenVO = { token: string; issuedAtEpochSec: number; ttlSeconds: number }
 type AttendanceStaticCodeVO = { code: string }
 type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
-type MetaOptionVO = { id: number; name: string }
+type MetaOptionVO = { id: number; name: string; description?: string | null }
 type SemesterMetaOptionVO = { id: number; name: string; startDate: string; endDate: string }
 type ExperimentCourseSlotInstanceVO = {
   id: number
@@ -321,7 +322,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'course' | 'flow' | 'report' | 'schedule' | 'history'>('course')
+const activeTab = ref<'course' | 'labroom' | 'flow' | 'report' | 'schedule' | 'history'>('course')
 const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
@@ -2814,6 +2815,18 @@ async function copyLink() {
             </el-card>
           </el-tab-pane>
 
+          <el-tab-pane label="实验室管理" name="labroom">
+            <div class="card card-pad">
+              <div style="display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap">
+                <div>
+                  <div>实验室管理</div>
+                  <div class="meta">教师端和管理员端共用同一套实验室库。这里可维护实验室基础信息与按周开放时段。</div>
+                </div>
+              </div>
+            </div>
+            <LabRoomManager api-base="/api/teacher/lab-rooms" />
+          </el-tab-pane>
+
           <el-tab-pane label="实验过程管理" name="flow">
             <el-card v-if="isMobile" class="block" shadow="never">
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -3632,7 +3645,12 @@ async function copyLink() {
                 <el-option v-for="item in experimentCourseMeta.timeSlots" :key="item.id" :label="item.name" :value="item.id" />
               </el-select>
               <el-select v-model="slot.labRoomId" placeholder="地点" style="width: 100%">
-                <el-option v-for="item in experimentCourseMeta.labRooms" :key="item.id" :label="item.name" :value="item.id" />
+                <el-option
+                  v-for="item in experimentCourseMeta.labRooms"
+                  :key="item.id"
+                  :label="item.description ? `${item.name}（${item.description}）` : item.name"
+                  :value="item.id"
+                />
               </el-select>
               <el-input-number v-model="slot.capacity" :min="1" :max="999" style="width: 100%" />
             </div>

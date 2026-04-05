@@ -16,13 +16,11 @@ import cn.edu.jnu.labflowreport.common.api.ApiCode;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.persistence.entity.AuditLogEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.DeviceEntity;
-import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.AuditLogMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.DeviceMapper;
-import cn.edu.jnu.labflowreport.persistence.mapper.LabRoomMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SemesterMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysRoleMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserRoleMapper;
@@ -39,7 +37,7 @@ public class AdminResourceService {
 
     private final SysRoleMapper sysRoleMapper;
     private final SysUserRoleMapper sysUserRoleMapper;
-    private final LabRoomMapper labRoomMapper;
+    private final LabRoomManagementService labRoomManagementService;
     private final DeviceMapper deviceMapper;
     private final SemesterMapper semesterMapper;
     private final AuditLogMapper auditLogMapper;
@@ -48,7 +46,7 @@ public class AdminResourceService {
     public AdminResourceService(
             SysRoleMapper sysRoleMapper,
             SysUserRoleMapper sysUserRoleMapper,
-            LabRoomMapper labRoomMapper,
+            LabRoomManagementService labRoomManagementService,
             DeviceMapper deviceMapper,
             SemesterMapper semesterMapper,
             AuditLogMapper auditLogMapper,
@@ -56,7 +54,7 @@ public class AdminResourceService {
     ) {
         this.sysRoleMapper = sysRoleMapper;
         this.sysUserRoleMapper = sysUserRoleMapper;
-        this.labRoomMapper = labRoomMapper;
+        this.labRoomManagementService = labRoomManagementService;
         this.deviceMapper = deviceMapper;
         this.semesterMapper = semesterMapper;
         this.auditLogMapper = auditLogMapper;
@@ -76,78 +74,26 @@ public class AdminResourceService {
     }
 
     public List<AdminLabRoomVO> listLabRooms() {
-        return labRoomMapper.selectList(new LambdaQueryWrapper<LabRoomEntity>().orderByAsc(LabRoomEntity::getId))
-                .stream()
-                .map(r -> new AdminLabRoomVO(r.getId(), r.getName(), r.getLocation(), r.getOpenHours(), r.getCreatedAt(), r.getUpdatedAt()))
-                .toList();
+        return labRoomManagementService.listLabRooms();
     }
 
     @Transactional
     public AdminLabRoomVO createLabRoom(AuthenticatedUser actor, AdminLabRoomRequest request) {
-        LabRoomEntity dup = labRoomMapper.selectOne(new LambdaQueryWrapper<LabRoomEntity>()
-                .eq(LabRoomEntity::getName, request.name().trim())
-                .last("LIMIT 1"));
-        if (dup != null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, "实验室名称已存在");
-        }
-        LabRoomEntity entity = new LabRoomEntity();
-        entity.setName(request.name().trim());
-        entity.setLocation(request.location());
-        entity.setOpenHours(request.openHours());
-        entity.setCreatedAt(LocalDateTime.now());
-        entity.setUpdatedAt(LocalDateTime.now());
-        labRoomMapper.insert(entity);
-        adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_CREATE, "lab_room", entity.getId(), Map.of("name", entity.getName()));
-        return new AdminLabRoomVO(entity.getId(), entity.getName(), entity.getLocation(), entity.getOpenHours(), entity.getCreatedAt(), entity.getUpdatedAt());
+        return labRoomManagementService.createLabRoom(actor, request);
     }
 
     @Transactional
     public AdminLabRoomVO updateLabRoom(AuthenticatedUser actor, Long id, AdminLabRoomRequest request) {
-        LabRoomEntity existing = labRoomMapper.selectById(id);
-        if (existing == null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验室不存在");
-        }
-        LabRoomEntity dup = labRoomMapper.selectOne(new LambdaQueryWrapper<LabRoomEntity>()
-                .eq(LabRoomEntity::getName, request.name().trim())
-                .ne(LabRoomEntity::getId, id)
-                .last("LIMIT 1"));
-        if (dup != null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, "实验室名称已被占用");
-        }
-        labRoomMapper.update(null, new LambdaUpdateWrapper<LabRoomEntity>()
-                .eq(LabRoomEntity::getId, id)
-                .set(LabRoomEntity::getName, request.name().trim())
-                .set(LabRoomEntity::getLocation, request.location())
-                .set(LabRoomEntity::getOpenHours, request.openHours())
-                .set(LabRoomEntity::getUpdatedAt, LocalDateTime.now()));
-        adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_UPDATE, "lab_room", id, Map.of("name", request.name().trim()));
-        LabRoomEntity updated = labRoomMapper.selectById(id);
-        return new AdminLabRoomVO(updated.getId(), updated.getName(), updated.getLocation(), updated.getOpenHours(), updated.getCreatedAt(), updated.getUpdatedAt());
+        return labRoomManagementService.updateLabRoom(actor, id, request);
     }
 
     @Transactional
     public void deleteLabRoom(AuthenticatedUser actor, Long id) {
-        LabRoomEntity existing = labRoomMapper.selectById(id);
-        if (existing == null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验室不存在");
-        }
-        labRoomMapper.deleteById(id);
-        adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_DELETE, "lab_room", id, Map.of("name", existing.getName()));
+        labRoomManagementService.deleteLabRoom(actor, id);
     }
 
     public String exportLabRoomsCsv(AuthenticatedUser actor) {
-        List<AdminLabRoomVO> rooms = listLabRooms();
-        StringBuilder csv = new StringBuilder();
-        csv.append("id,name,location,openHours,createdAt\n");
-        for (AdminLabRoomVO r : rooms) {
-            csv.append(AdminCsv.cell(r.id())).append(",");
-            csv.append(AdminCsv.cell(r.name())).append(",");
-            csv.append(AdminCsv.cell(r.location())).append(",");
-            csv.append(AdminCsv.cell(r.openHours())).append(",");
-            csv.append(AdminCsv.cell(r.createdAt())).append("\n");
-        }
-        adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_EXPORT, "lab_room", null, Map.of("count", rooms.size()));
-        return csv.toString();
+        return labRoomManagementService.exportLabRoomsCsv(actor);
     }
 
     public List<AdminDeviceVO> listDevices(String q, String status) {

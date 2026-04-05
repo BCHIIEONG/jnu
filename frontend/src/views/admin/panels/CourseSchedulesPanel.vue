@@ -6,7 +6,7 @@ import { useAuthStore } from '../../../stores/auth'
 
 type Semester = { id: number; name: string }
 type ClassItem = { id: number; name: string; displayName: string; departmentName?: string }
-type LabRoom = { id: number; name: string }
+type LabRoom = { id: number; name: string; openHours?: string | null }
 type TimeSlot = { id: number; code: string; name: string; startTime: string; endTime: string }
 type TeacherUser = { id: number; username: string; displayName: string }
 
@@ -224,7 +224,12 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="实验室">
           <el-select v-model="form.labRoomId" clearable style="width: 100%">
-            <el-option v-for="r in labRooms" :key="r.id" :label="r.name" :value="r.id" />
+            <el-option
+              v-for="r in labRooms"
+              :key="r.id"
+              :label="r.openHours ? `${r.name}（${r.openHours}）` : r.name"
+              :value="r.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="日期">

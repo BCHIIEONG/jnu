@@ -2,6 +2,7 @@
 package cn.edu.jnu.labflowreport.elective.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.edu.jnu.labflowreport.admin.service.LabRoomManagementService;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceSessionMapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
@@ -84,6 +85,7 @@ public class ExperimentCourseService {
     private final SysUserMapper sysUserMapper;
     private final LabRoomMapper labRoomMapper;
     private final TimeSlotMapper timeSlotMapper;
+    private final LabRoomManagementService labRoomManagementService;
 
     public ExperimentCourseService(
             ExperimentCourseMapper experimentCourseMapper,
@@ -98,7 +100,8 @@ public class ExperimentCourseService {
             OrgClassMapper orgClassMapper,
             SysUserMapper sysUserMapper,
             LabRoomMapper labRoomMapper,
-            TimeSlotMapper timeSlotMapper
+            TimeSlotMapper timeSlotMapper,
+            LabRoomManagementService labRoomManagementService
     ) {
         this.experimentCourseMapper = experimentCourseMapper;
         this.experimentCourseSlotMapper = experimentCourseSlotMapper;
@@ -113,6 +116,7 @@ public class ExperimentCourseService {
         this.sysUserMapper = sysUserMapper;
         this.labRoomMapper = labRoomMapper;
         this.timeSlotMapper = timeSlotMapper;
+        this.labRoomManagementService = labRoomManagementService;
     }
 
     public List<ExperimentCourseVO> listTeacherCourses(AuthenticatedUser actor) {
@@ -392,11 +396,10 @@ public class ExperimentCourseService {
                 .map(item -> new SemesterOptionVO(item.getId(), item.getName(), item.getStartDate(), item.getEndDate()))
                 .toList();
         List<MetaOptionVO> timeSlots = timeSlotMapper.findAllOrdered().stream()
-                .map(item -> new MetaOptionVO(item.getId(), item.getName()))
+                .map(item -> new MetaOptionVO(item.getId(), item.getName(), null))
                 .toList();
-        List<MetaOptionVO> labRooms = labRoomMapper.selectList(null).stream()
-                .sorted(Comparator.comparing(LabRoomEntity::getName, Comparator.nullsLast(String::compareTo)))
-                .map(item -> new MetaOptionVO(item.getId(), item.getName()))
+        List<MetaOptionVO> labRooms = labRoomManagementService.listLabRooms().stream()
+                .map(item -> new MetaOptionVO(item.id(), item.name(), item.openHours()))
                 .toList();
         return new MetaVO(semesters, timeSlots, labRooms);
     }
@@ -868,7 +871,7 @@ public class ExperimentCourseService {
     private record InstanceDraft(LocalDate lessonDate, Integer teachingWeek, String displayName) {
     }
 
-    public record MetaOptionVO(Long id, String name) {
+    public record MetaOptionVO(Long id, String name, String description) {
     }
 
     public record SemesterOptionVO(Long id, String name, LocalDate startDate, LocalDate endDate) {
