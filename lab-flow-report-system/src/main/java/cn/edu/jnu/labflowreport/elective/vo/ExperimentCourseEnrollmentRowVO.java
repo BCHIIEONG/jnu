@@ -15,6 +15,7 @@ public record ExperimentCourseEnrollmentRowVO(
         String studentUsername,
         String studentDisplayName,
         String classDisplayName,
+        String joinSource,
         LocalDateTime selectedAt
 ) {
 }

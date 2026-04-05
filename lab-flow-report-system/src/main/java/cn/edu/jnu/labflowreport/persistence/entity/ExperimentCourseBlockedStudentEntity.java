@@ -7,17 +7,13 @@ import java.time.LocalDateTime;
 import lombok.Data;
 
 @Data
-@TableName("experiment_course_enrollment")
-public class ExperimentCourseEnrollmentEntity {
+@TableName("experiment_course_blocked_student")
+public class ExperimentCourseBlockedStudentEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long courseId;
-    private Long slotId;
     private Long studentId;
-    private String status;
-    private String joinSource;
-    private LocalDateTime selectedAt;
-    private LocalDateTime removedAt;
-    private Long removedByTeacherId;
+    private Long blockedByTeacherId;
+    private LocalDateTime blockedAt;
 }

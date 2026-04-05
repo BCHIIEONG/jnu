@@ -65,6 +65,7 @@ public interface ExperimentCourseSlotMapper extends BaseMapper<ExperimentCourseS
                    u.username AS student_username,
                    u.display_name AS student_display_name,
                    CASE WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name) ELSE c.name END AS class_display_name,
+                   e.join_source,
                    e.selected_at
             FROM experiment_course_enrollment e
             JOIN experiment_course ec ON ec.id = e.course_id

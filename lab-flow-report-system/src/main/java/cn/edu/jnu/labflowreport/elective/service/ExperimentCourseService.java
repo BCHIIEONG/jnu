@@ -10,7 +10,11 @@ import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseEnrollRequest;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseSaveRequest;
+import cn.edu.jnu.labflowreport.elective.dto.TeacherExperimentCourseManualEnrollRequest;
+import cn.edu.jnu.labflowreport.elective.dto.TeacherExperimentCourseRemoveStudentRequest;
+import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseBlockedStudentVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseEnrollmentRowVO;
+import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseRosterVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseSlotInstanceRowVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseSlotRowVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseStudentOptionVO;
@@ -22,6 +26,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEnrollmentEnt
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotInstanceEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseBlockedStudentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseTargetClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseTargetStudentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
@@ -29,6 +34,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseEnrollmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseBlockedStudentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotInstanceMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotMapper;
@@ -71,6 +77,7 @@ public class ExperimentCourseService {
     private final ExperimentCourseTargetClassMapper experimentCourseTargetClassMapper;
     private final ExperimentCourseTargetStudentMapper experimentCourseTargetStudentMapper;
     private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
+    private final ExperimentCourseBlockedStudentMapper experimentCourseBlockedStudentMapper;
     private final AttendanceSessionMapper attendanceSessionMapper;
     private final SemesterMapper semesterMapper;
     private final OrgClassMapper orgClassMapper;
@@ -85,6 +92,7 @@ public class ExperimentCourseService {
             ExperimentCourseTargetClassMapper experimentCourseTargetClassMapper,
             ExperimentCourseTargetStudentMapper experimentCourseTargetStudentMapper,
             ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
+            ExperimentCourseBlockedStudentMapper experimentCourseBlockedStudentMapper,
             AttendanceSessionMapper attendanceSessionMapper,
             SemesterMapper semesterMapper,
             OrgClassMapper orgClassMapper,
@@ -98,6 +106,7 @@ public class ExperimentCourseService {
         this.experimentCourseTargetClassMapper = experimentCourseTargetClassMapper;
         this.experimentCourseTargetStudentMapper = experimentCourseTargetStudentMapper;
         this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
+        this.experimentCourseBlockedStudentMapper = experimentCourseBlockedStudentMapper;
         this.attendanceSessionMapper = attendanceSessionMapper;
         this.semesterMapper = semesterMapper;
         this.orgClassMapper = orgClassMapper;
@@ -193,6 +202,14 @@ public class ExperimentCourseService {
         return experimentCourseSlotMapper.findEnrollmentRowsByCourseId(courseId);
     }
 
+    public ExperimentCourseRosterVO getTeacherCourseRoster(Long courseId, AuthenticatedUser actor) {
+        requireManageableCourse(courseId, actor);
+        return new ExperimentCourseRosterVO(
+                experimentCourseSlotMapper.findEnrollmentRowsByCourseId(courseId),
+                experimentCourseBlockedStudentMapper.findRowsByCourseId(courseId)
+        );
+    }
+
     public List<ExperimentCourseStudentOptionVO> listTeacherSlotRoster(Long slotId, AuthenticatedUser actor) {
         ExperimentCourseSlotEntity slot = experimentCourseSlotMapper.selectById(slotId);
         if (slot == null) {
@@ -214,9 +231,10 @@ public class ExperimentCourseService {
         SysUserEntity user = requireStudent(student.userId());
         Map<Long, StudentEnrollmentRowVO> enrolled = experimentCourseEnrollmentMapper.findActiveRowsByStudentId(student.userId()).stream()
                 .collect(Collectors.toMap(StudentEnrollmentRowVO::courseId, x -> x, (a, b) -> a));
+        Set<Long> blockedCourseIds = new LinkedHashSet<>(experimentCourseBlockedStudentMapper.findCourseIdsByStudentId(student.userId()));
         return hydrateCourses(experimentCourseMapper.findOpenCourseSummaries(null)).stream()
-                .filter(course -> isEligible(course.getId(), user))
-                .map(course -> toStudentVo(course, enrolled.get(course.getId())))
+                .filter(course -> blockedCourseIds.contains(course.getId()) || isEligible(course.getId(), user))
+                .map(course -> toStudentVo(course, enrolled.get(course.getId()), blockedCourseIds.contains(course.getId())))
                 .toList();
     }
 
@@ -229,7 +247,7 @@ public class ExperimentCourseService {
         return hydrateCourses(enrolled.keySet().stream()
                 .map(experimentCourseMapper::findSummaryById)
                 .filter(Objects::nonNull)
-                .toList()).stream().map(course -> toStudentVo(course, enrolled.get(course.getId()))).toList();
+                .toList()).stream().map(course -> toStudentVo(course, enrolled.get(course.getId()), false)).toList();
     }
 
     @Transactional
@@ -240,10 +258,13 @@ public class ExperimentCourseService {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程不存在");
         }
         ensureCourseOpen(course);
+        if (isBlocked(courseId, student.userId())) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "你已被教师移出该实验课程，暂不可自行选课");
+        }
         if (!isEligible(courseId, user)) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "你不在该实验课程的开放范围内");
         }
-        ExperimentCourseEnrollmentEntity existing = experimentCourseEnrollmentMapper.findByCourseAndStudent(courseId, student.userId());
+        ExperimentCourseEnrollmentEntity existing = experimentCourseEnrollmentMapper.findByCourseAndStudentForUpdate(courseId, student.userId());
         if (existing != null && "ENROLLED".equalsIgnoreCase(existing.getStatus())) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "你已选过该实验课程");
         }
@@ -255,17 +276,96 @@ public class ExperimentCourseService {
         if (slot.getCapacity() != null && enrolled >= slot.getCapacity()) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "当前场次名额已满");
         }
-        ExperimentCourseEnrollmentEntity entity = new ExperimentCourseEnrollmentEntity();
-        entity.setCourseId(courseId);
-        entity.setSlotId(slot.getId());
-        entity.setStudentId(student.userId());
-        entity.setStatus("ENROLLED");
-        entity.setSelectedAt(LocalDateTime.now());
-        experimentCourseEnrollmentMapper.insert(entity);
+        LocalDateTime now = LocalDateTime.now();
+        if (existing == null) {
+            ExperimentCourseEnrollmentEntity entity = new ExperimentCourseEnrollmentEntity();
+            entity.setCourseId(courseId);
+            entity.setSlotId(slot.getId());
+            entity.setStudentId(student.userId());
+            entity.setStatus("ENROLLED");
+            entity.setJoinSource("STUDENT_SELF");
+            entity.setSelectedAt(now);
+            experimentCourseEnrollmentMapper.insert(entity);
+        } else {
+            existing.setSlotId(slot.getId());
+            existing.setStatus("ENROLLED");
+            existing.setJoinSource("STUDENT_SELF");
+            existing.setSelectedAt(now);
+            existing.setRemovedAt(null);
+            existing.setRemovedByTeacherId(null);
+            experimentCourseEnrollmentMapper.updateById(existing);
+        }
         return listStudentMyCourses(student).stream()
                 .filter(item -> Objects.equals(item.getId(), courseId))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(ApiCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR, "选课成功但读取失败"));
+    }
+
+    @Transactional
+    public ExperimentCourseRosterVO teacherEnrollStudent(Long courseId, AuthenticatedUser actor, TeacherExperimentCourseManualEnrollRequest request) {
+        ExperimentCourseEntity course = experimentCourseMapper.findByIdForUpdate(courseId);
+        if (course == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "实验课程不存在");
+        }
+        requireManageableCourse(courseId, actor);
+        SysUserEntity student = requireStudent(request.studentId());
+        ExperimentCourseSlotEntity slot = experimentCourseSlotMapper.findByIdForUpdate(request.slotId());
+        if (slot == null || !Objects.equals(slot.getCourseId(), courseId)) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "场次不存在或不属于该课程");
+        }
+        removeBlocked(courseId, student.getId());
+        ExperimentCourseEnrollmentEntity existing = experimentCourseEnrollmentMapper.findByCourseAndStudentForUpdate(courseId, student.getId());
+        if (existing != null && "ENROLLED".equalsIgnoreCase(existing.getStatus()) && Objects.equals(existing.getSlotId(), slot.getId())) {
+            existing.setJoinSource("TEACHER_MANUAL");
+            experimentCourseEnrollmentMapper.updateById(existing);
+            return getTeacherCourseRoster(courseId, actor);
+        }
+        int enrolled = nvl(experimentCourseEnrollmentMapper.countEnrolledBySlotId(slot.getId()));
+        if (slot.getCapacity() != null && enrolled >= slot.getCapacity()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "当前场次名额已满");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (existing == null) {
+            ExperimentCourseEnrollmentEntity entity = new ExperimentCourseEnrollmentEntity();
+            entity.setCourseId(courseId);
+            entity.setSlotId(slot.getId());
+            entity.setStudentId(student.getId());
+            entity.setStatus("ENROLLED");
+            entity.setJoinSource("TEACHER_MANUAL");
+            entity.setSelectedAt(now);
+            experimentCourseEnrollmentMapper.insert(entity);
+        } else {
+            existing.setSlotId(slot.getId());
+            existing.setStatus("ENROLLED");
+            existing.setJoinSource("TEACHER_MANUAL");
+            existing.setSelectedAt(now);
+            existing.setRemovedAt(null);
+            existing.setRemovedByTeacherId(null);
+            experimentCourseEnrollmentMapper.updateById(existing);
+        }
+        return getTeacherCourseRoster(courseId, actor);
+    }
+
+    @Transactional
+    public ExperimentCourseRosterVO teacherRemoveStudent(Long courseId, AuthenticatedUser actor, TeacherExperimentCourseRemoveStudentRequest request) {
+        requireManageableCourse(courseId, actor);
+        ExperimentCourseEnrollmentEntity existing = experimentCourseEnrollmentMapper.findByCourseAndStudentForUpdate(courseId, request.studentId());
+        if (existing == null || !"ENROLLED".equalsIgnoreCase(existing.getStatus())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该学生当前不在实验课程报名名单中");
+        }
+        existing.setStatus("REMOVED");
+        existing.setRemovedAt(LocalDateTime.now());
+        existing.setRemovedByTeacherId(actor.userId());
+        experimentCourseEnrollmentMapper.updateById(existing);
+        upsertBlocked(courseId, request.studentId(), actor.userId());
+        return getTeacherCourseRoster(courseId, actor);
+    }
+
+    @Transactional
+    public ExperimentCourseRosterVO unblockStudent(Long courseId, Long studentId, AuthenticatedUser actor) {
+        requireManageableCourse(courseId, actor);
+        removeBlocked(courseId, studentId);
+        return getTeacherCourseRoster(courseId, actor);
     }
     public List<ExperimentCourseStudentOptionVO> listStudentOptions(String q) {
         String keyword = lower(q).trim();
@@ -555,7 +655,7 @@ public class ExperimentCourseService {
         }).toList();
     }
 
-    private StudentExperimentCourseVO toStudentVo(ExperimentCourseVO course, StudentEnrollmentRowVO enrollment) {
+    private StudentExperimentCourseVO toStudentVo(ExperimentCourseVO course, StudentEnrollmentRowVO enrollment, boolean blocked) {
         StudentExperimentCourseVO vo = new StudentExperimentCourseVO();
         vo.setId(course.getId());
         vo.setTitle(course.getTitle());
@@ -567,6 +667,8 @@ public class ExperimentCourseService {
         vo.setStatus(course.getStatus());
         vo.setEnrollDeadlineAt(course.getEnrollDeadlineAt());
         vo.setEnrolled(enrollment != null);
+        vo.setBlocked(blocked);
+        vo.setBlockedReason(blocked ? "已被教师移出该实验课程，暂不可自行选课" : null);
         vo.setSelectedSlotId(enrollment == null ? null : enrollment.slotId());
         vo.setSelectedAt(enrollment == null ? null : enrollment.selectedAt());
         vo.setSlots(course.getSlots());
@@ -620,6 +722,32 @@ public class ExperimentCourseService {
         boolean byClass = student.getClassId() != null && experimentCourseTargetClassMapper.findClassIdsByCourseId(courseId).contains(student.getClassId());
         boolean byStudent = experimentCourseTargetStudentMapper.findStudentIdsByCourseId(courseId).contains(student.getId());
         return byClass || byStudent;
+    }
+
+    private boolean isBlocked(Long courseId, Long studentId) {
+        return experimentCourseBlockedStudentMapper.findByCourseAndStudent(courseId, studentId) != null;
+    }
+
+    private void upsertBlocked(Long courseId, Long studentId, Long teacherId) {
+        ExperimentCourseBlockedStudentEntity existing = experimentCourseBlockedStudentMapper.findByCourseAndStudent(courseId, studentId);
+        if (existing == null) {
+            ExperimentCourseBlockedStudentEntity entity = new ExperimentCourseBlockedStudentEntity();
+            entity.setCourseId(courseId);
+            entity.setStudentId(studentId);
+            entity.setBlockedByTeacherId(teacherId);
+            entity.setBlockedAt(LocalDateTime.now());
+            experimentCourseBlockedStudentMapper.insert(entity);
+            return;
+        }
+        existing.setBlockedByTeacherId(teacherId);
+        existing.setBlockedAt(LocalDateTime.now());
+        experimentCourseBlockedStudentMapper.updateById(existing);
+    }
+
+    private void removeBlocked(Long courseId, Long studentId) {
+        experimentCourseBlockedStudentMapper.delete(new LambdaQueryWrapper<ExperimentCourseBlockedStudentEntity>()
+                .eq(ExperimentCourseBlockedStudentEntity::getCourseId, courseId)
+                .eq(ExperimentCourseBlockedStudentEntity::getStudentId, studentId));
     }
 
     private void ensureCourseOpen(ExperimentCourseEntity course) {

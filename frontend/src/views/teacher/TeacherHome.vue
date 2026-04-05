@@ -162,7 +162,20 @@ type ExperimentCourseEnrollmentRowVO = {
   studentId: number
   studentUsername: string
   studentDisplayName: string
+  classDisplayName?: string | null
+  joinSource?: 'STUDENT_SELF' | 'TEACHER_MANUAL' | null
   selectedAt: string
+}
+type ExperimentCourseBlockedStudentVO = {
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  classDisplayName?: string | null
+  blockedAt: string
+}
+type ExperimentCourseRosterVO = {
+  enrollments: ExperimentCourseEnrollmentRowVO[]
+  blockedStudents: ExperimentCourseBlockedStudentVO[]
 }
 type ExperimentCourseStudentOptionVO = {
   id: number
@@ -243,6 +256,7 @@ type TaskCompletionVO = {
   taskId: number
   studentId: number
   status: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  completionSource?: 'STUDENT_REQUEST' | 'TEACHER_DIRECT' | null
   requestedAt?: string | null
   confirmedAt?: string | null
   confirmedBy?: number | null
@@ -255,6 +269,7 @@ type TeacherTaskProgressStudentVO = {
   classDisplayName?: string | null
   progressCount: number
   completionStatus: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  completionSource?: 'STUDENT_REQUEST' | 'TEACHER_DIRECT' | null
   latestUpdatedAt?: string | null
   requestedAt?: string | null
   confirmedAt?: string | null
@@ -266,6 +281,7 @@ type TeacherTaskProgressDetailVO = {
   studentDisplayName: string
   classDisplayName?: string | null
   completionStatus: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  completionSource?: 'STUDENT_REQUEST' | 'TEACHER_DIRECT' | null
   requestedAt?: string | null
   confirmedAt?: string | null
   confirmedByDisplayName?: string | null
@@ -361,6 +377,13 @@ const loadingExperimentCourseMeta = ref(false)
 const togglingExperimentCourseId = ref<number | null>(null)
 const loadingCourseEnrollments = ref(false)
 const experimentCourseEnrollments = ref<ExperimentCourseEnrollmentRowVO[]>([])
+const experimentCourseBlockedStudents = ref<ExperimentCourseBlockedStudentVO[]>([])
+const manualRosterStudentId = ref<number | null>(null)
+const manualRosterSlotId = ref<number | null>(null)
+const manualRosterStudentKeyword = ref('')
+const enrollingRosterStudent = ref(false)
+const removingRosterStudentId = ref<number | null>(null)
+const unblockingRosterStudentId = ref<number | null>(null)
 const experimentCourseDetailExpanded = reactive<Record<number, boolean>>({})
 const experimentCourseForm = reactive({
   title: '',
@@ -640,6 +663,12 @@ function completionStatusType(status?: TeacherTaskProgressStudentVO['completionS
   return 'info'
 }
 
+function completionSourceText(source?: TeacherTaskProgressStudentVO['completionSource'] | TaskCompletionVO['completionSource']) {
+  if (source === 'TEACHER_DIRECT') return '教师直接登记完成'
+  if (source === 'STUDENT_REQUEST') return '学生申请完成'
+  return '未登记'
+}
+
 function isImageLike(name?: string | null, contentType?: string | null) {
   const ct = (contentType ?? '').toLowerCase()
   const n = (name ?? '').toLowerCase()
@@ -835,6 +864,36 @@ async function confirmCompletion(row: TeacherTaskProgressStudentVO) {
     }
   } catch (e: any) {
     ElMessage.error(e?.message ?? '确认失败')
+  } finally {
+    confirmingCompletion.value = null
+  }
+}
+
+async function directConfirmCompletion(row: TeacherTaskProgressStudentVO) {
+  if (!selectedTaskId.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认直接将 ${row.studentDisplayName}（${row.studentUsername}）登记为已完成？此操作不需要学生先提交完成登记。`,
+      '直接登记完成',
+      { type: 'warning', confirmButtonText: '直接登记', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  confirmingCompletion.value = row.studentId
+  try {
+    await apiData(
+      `/api/teacher/tasks/${selectedTaskId.value}/completion/${row.studentId}/direct-confirm`,
+      { method: 'POST' },
+      auth.token,
+    )
+    ElMessage.success('已直接登记完成')
+    await loadProgressStudents()
+    if (progressDetail.value?.studentId === row.studentId) {
+      await openProgressDetail(row)
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '直接登记失败')
   } finally {
     confirmingCompletion.value = null
   }
@@ -1230,6 +1289,11 @@ async function searchExperimentCourseStudents(query = '') {
   }
 }
 
+function searchManualRosterStudents(query = '') {
+  manualRosterStudentKeyword.value = query
+  return searchExperimentCourseStudents(query)
+}
+
 function createExperimentCourseSlot(): ExperimentCourseFormSlot {
   return {
     name: '',
@@ -1456,6 +1520,7 @@ async function loadExperimentCourses(selectId?: number | null) {
     experimentCourses.value = []
     selectedExperimentCourseId.value = null
     experimentCourseEnrollments.value = []
+    experimentCourseBlockedStudents.value = []
     ElMessage.error(e?.message ?? '加载实验课程失败')
   } finally {
     loadingExperimentCourses.value = false
@@ -1465,21 +1530,132 @@ async function loadExperimentCourses(selectId?: number | null) {
 async function loadExperimentCourseEnrollments() {
   if (!selectedExperimentCourseId.value) {
     experimentCourseEnrollments.value = []
+    experimentCourseBlockedStudents.value = []
+    manualRosterStudentId.value = null
+    manualRosterSlotId.value = null
     return
   }
   loadingCourseEnrollments.value = true
   try {
-    experimentCourseEnrollments.value = await apiData<ExperimentCourseEnrollmentRowVO[]>(
-      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/enrollments`,
+    const roster = await apiData<ExperimentCourseRosterVO>(
+      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/roster`,
       { method: 'GET' },
       auth.token,
     )
+    experimentCourseEnrollments.value = roster.enrollments || []
+    experimentCourseBlockedStudents.value = roster.blockedStudents || []
+    if (!manualRosterSlotId.value || !experimentCourseDetail.value?.slots.find((slot) => slot.id === manualRosterSlotId.value)) {
+      manualRosterSlotId.value = experimentCourseDetail.value?.slots[0]?.id ?? null
+    }
   } catch (e: any) {
     experimentCourseEnrollments.value = []
+    experimentCourseBlockedStudents.value = []
     ElMessage.error(e?.message ?? '加载选课名单失败')
   } finally {
     loadingCourseEnrollments.value = false
   }
+}
+
+async function enrollRosterStudent() {
+  if (!selectedExperimentCourseId.value) return
+  if (!manualRosterStudentId.value) {
+    ElMessage.warning('请先选择学生')
+    return
+  }
+  if (!manualRosterSlotId.value) {
+    ElMessage.warning('请先选择目标场次')
+    return
+  }
+  enrollingRosterStudent.value = true
+  try {
+    const roster = await apiData<ExperimentCourseRosterVO>(
+      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/roster/enroll`,
+      {
+        method: 'POST',
+        body: {
+          studentId: manualRosterStudentId.value,
+          slotId: manualRosterSlotId.value,
+        },
+      },
+      auth.token,
+    )
+    experimentCourseEnrollments.value = roster.enrollments || []
+    experimentCourseBlockedStudents.value = roster.blockedStudents || []
+    manualRosterStudentId.value = null
+    manualRosterStudentKeyword.value = ''
+    await Promise.all([loadExperimentCourses(selectedExperimentCourseId.value), loadTasks(), loadWeek()])
+    ElMessage.success('学生已加入对应场次')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '加入学生失败')
+  } finally {
+    enrollingRosterStudent.value = false
+  }
+}
+
+async function removeRosterStudent(row: ExperimentCourseEnrollmentRowVO) {
+  if (!selectedExperimentCourseId.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${row.studentDisplayName}（${row.studentUsername}）移出当前实验课程，并加入禁选名单吗？`,
+      '移出学生',
+      { type: 'warning', confirmButtonText: '移出', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  removingRosterStudentId.value = row.studentId
+  try {
+    const roster = await apiData<ExperimentCourseRosterVO>(
+      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/roster/remove`,
+      {
+        method: 'POST',
+        body: { studentId: row.studentId },
+      },
+      auth.token,
+    )
+    experimentCourseEnrollments.value = roster.enrollments || []
+    experimentCourseBlockedStudents.value = roster.blockedStudents || []
+    await Promise.all([loadExperimentCourses(selectedExperimentCourseId.value), loadTasks(), loadWeek()])
+    ElMessage.success('学生已移出课程并加入禁选名单')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '移出学生失败')
+  } finally {
+    removingRosterStudentId.value = null
+  }
+}
+
+async function unblockRosterStudent(row: ExperimentCourseBlockedStudentVO) {
+  if (!selectedExperimentCourseId.value) return
+  unblockingRosterStudentId.value = row.studentId
+  try {
+    const roster = await apiData<ExperimentCourseRosterVO>(
+      `/api/teacher/experiment-courses/${selectedExperimentCourseId.value}/blocked-students/${row.studentId}`,
+      { method: 'DELETE' },
+      auth.token,
+    )
+    experimentCourseEnrollments.value = roster.enrollments || []
+    experimentCourseBlockedStudents.value = roster.blockedStudents || []
+    ElMessage.success('已解除禁选，学生可重新自助选课')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '解除禁选失败')
+  } finally {
+    unblockingRosterStudentId.value = null
+  }
+}
+
+const availableRosterStudentOptions = computed(() => {
+  const activeIds = new Set(experimentCourseEnrollments.value.map((row) => row.studentId))
+  const keyword = manualRosterStudentKeyword.value.trim().toLowerCase()
+  return experimentCourseStudentOptions.value.filter((student) => {
+    if (activeIds.has(student.id)) return false
+    if (!keyword) return true
+    const text = `${student.displayName ?? ''} ${student.username ?? ''} ${student.classDisplayName ?? ''}`.toLowerCase()
+    return text.includes(keyword)
+  })
+})
+
+function enrollmentJoinSourceText(source?: 'STUDENT_SELF' | 'TEACHER_MANUAL' | null) {
+  return source === 'TEACHER_MANUAL' ? '教师加入' : '学生自选'
 }
 
 async function saveExperimentCourse() {
@@ -2438,11 +2614,46 @@ async function copyLink() {
               <template #header>
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
                   <div>{{ experimentCourseDetail.title }}</div>
-                  <div class="meta">选课名单</div>
+                  <div class="meta">报名管理</div>
                 </div>
               </template>
               <div class="meta" style="margin-bottom: 8px">截止：{{ experimentCourseDetail.enrollDeadlineAt }} / 状态：{{ experimentCourseDetail.status }}</div>
               <div class="meta" style="margin-bottom: 12px">说明：{{ experimentCourseDetail.description || '（无说明）' }}</div>
+              <el-card shadow="never" style="margin-bottom: 12px; background: #fafafa">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div style="font-weight: 600">手动加入学生</div>
+                  <div class="meta">指定学生只代表可自助选课；这里会直接把学生加入到具体场次</div>
+                </div>
+                <div :class="isMobile ? 'mobileRosterEditor' : 'desktopRosterEditor'" style="margin-top: 10px">
+                  <el-select
+                    v-model="manualRosterStudentId"
+                    filterable
+                    clearable
+                    remote
+                    reserve-keyword
+                    placeholder="搜索学生姓名/用户名"
+                    :style="isMobile ? 'width: 100%' : 'width: 320px'"
+                    :remote-method="searchManualRosterStudents"
+                    :loading="loadingExperimentCourseStudents"
+                  >
+                    <el-option
+                      v-for="student in availableRosterStudentOptions"
+                      :key="student.id"
+                      :label="`${student.displayName} / ${student.username}${student.classDisplayName ? ` / ${student.classDisplayName}` : ''}`"
+                      :value="student.id"
+                    />
+                  </el-select>
+                  <el-select v-model="manualRosterSlotId" placeholder="选择目标场次" :style="isMobile ? 'width: 100%' : 'width: 300px'">
+                    <el-option
+                      v-for="(slot, slotIndex) in experimentCourseDetail.slots"
+                      :key="slot.id"
+                      :label="`${slot.name || `场次${slotIndex + 1}`} / ${slot.mode === 'RECURRING' ? '多次课' : '单次课'} / 已选 ${slot.enrolledCount}`"
+                      :value="slot.id"
+                    />
+                  </el-select>
+                  <el-button type="primary" :loading="enrollingRosterStudent" @click="enrollRosterStudent">加入场次</el-button>
+                </div>
+              </el-card>
               <div v-for="(slot, slotIndex) in experimentCourseDetail.slots" :key="slot.id" class="deviceBox" style="margin-bottom: 10px">
                 <div class="deviceTitle">{{ slot.name || `场次${slotIndex + 1}` }} / {{ slot.mode === 'RECURRING' ? '多次课' : '单次课' }}</div>
                 <div class="meta">
@@ -2474,18 +2685,132 @@ async function copyLink() {
                     </div>
                   </div>
                 </div>
-                <el-table
-                  :data="experimentCourseEnrollments.filter((row) => row.slotId === slot.id)"
-                  size="small"
-                  v-loading="loadingCourseEnrollments"
-                  empty-text="该场次暂无学生报名"
-                  style="margin-top: 8px"
-                >
-                  <el-table-column prop="studentDisplayName" label="学生姓名" min-width="140" />
-                  <el-table-column prop="studentUsername" label="用户名" width="140" />
-                  <el-table-column prop="selectedAt" label="选课时间" min-width="180" />
-                </el-table>
+                <template v-if="!isMobile">
+                  <el-table
+                    :data="experimentCourseEnrollments.filter((row) => row.slotId === slot.id)"
+                    size="small"
+                    v-loading="loadingCourseEnrollments"
+                    empty-text="该场次暂无学生报名"
+                    style="margin-top: 8px"
+                  >
+                    <el-table-column prop="studentDisplayName" label="学生姓名" min-width="140" />
+                    <el-table-column prop="studentUsername" label="用户名" width="140" />
+                    <el-table-column prop="classDisplayName" label="班级" min-width="170" />
+                    <el-table-column label="加入方式" width="110">
+                      <template #default="{ row }: { row: ExperimentCourseEnrollmentRowVO }">
+                        {{ enrollmentJoinSourceText(row.joinSource) }}
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="selectedAt" label="选课时间" min-width="180" />
+                    <el-table-column label="操作" width="110" fixed="right">
+                      <template #default="{ row }: { row: ExperimentCourseEnrollmentRowVO }">
+                        <el-button
+                          size="small"
+                          type="danger"
+                          text
+                          :loading="removingRosterStudentId === row.studentId"
+                          @click="removeRosterStudent(row)"
+                        >
+                          踢出
+                        </el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="loadingCourseEnrollments" class="meta" style="margin-top: 8px">加载中...</div>
+                  <div v-else-if="experimentCourseEnrollments.filter((row) => row.slotId === slot.id).length === 0" class="meta" style="margin-top: 8px">
+                    该场次暂无学生报名
+                  </div>
+                  <el-card
+                    v-else
+                    v-for="row in experimentCourseEnrollments.filter((item) => item.slotId === slot.id)"
+                    :key="`${slot.id}-${row.studentId}`"
+                    shadow="never"
+                    class="stuCard"
+                    style="margin-top: 8px"
+                  >
+                    <div class="stuHead">
+                      <div>
+                        <div class="stuName">{{ row.studentDisplayName }}</div>
+                        <div class="meta">{{ row.studentUsername }}</div>
+                      </div>
+                      <el-tag size="small">{{ enrollmentJoinSourceText(row.joinSource) }}</el-tag>
+                    </div>
+                    <div class="meta" style="margin-top: 8px">班级：{{ row.classDisplayName || '-' }}</div>
+                    <div class="meta">选课时间：{{ row.selectedAt }}</div>
+                    <div class="stuActions">
+                      <el-button
+                        size="small"
+                        type="danger"
+                        :loading="removingRosterStudentId === row.studentId"
+                        @click="removeRosterStudent(row)"
+                      >
+                        踢出
+                      </el-button>
+                    </div>
+                  </el-card>
+                </template>
               </div>
+              <el-card shadow="never" style="margin-top: 12px">
+                <template #header>
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px">
+                    <div>禁选名单</div>
+                    <div class="meta">被踢出的学生不能自行重新选课，需老师解除禁选或重新手动加入</div>
+                  </div>
+                </template>
+                <template v-if="!isMobile">
+                  <el-table
+                    :data="experimentCourseBlockedStudents"
+                    size="small"
+                    v-loading="loadingCourseEnrollments"
+                    empty-text="暂无禁选学生"
+                  >
+                    <el-table-column prop="studentDisplayName" label="学生姓名" min-width="140" />
+                    <el-table-column prop="studentUsername" label="用户名" width="140" />
+                    <el-table-column prop="classDisplayName" label="班级" min-width="170" />
+                    <el-table-column prop="blockedAt" label="禁选时间" min-width="180" />
+                    <el-table-column label="操作" width="120" fixed="right">
+                      <template #default="{ row }: { row: ExperimentCourseBlockedStudentVO }">
+                        <el-button
+                          size="small"
+                          type="primary"
+                          text
+                          :loading="unblockingRosterStudentId === row.studentId"
+                          @click="unblockRosterStudent(row)"
+                        >
+                          解除禁选
+                        </el-button>
+                      </template>
+                    </el-table-column>
+                  </el-table>
+                </template>
+                <template v-else>
+                  <div v-if="loadingCourseEnrollments" class="meta">加载中...</div>
+                  <div v-else-if="experimentCourseBlockedStudents.length === 0" class="meta">暂无禁选学生</div>
+                  <el-card v-else v-for="row in experimentCourseBlockedStudents" :key="row.studentId" shadow="never" class="stuCard">
+                    <div class="stuHead">
+                      <div>
+                        <div class="stuName">{{ row.studentDisplayName }}</div>
+                        <div class="meta">{{ row.studentUsername }}</div>
+                      </div>
+                      <el-tag size="small" type="warning">禁选</el-tag>
+                    </div>
+                    <div class="meta" style="margin-top: 8px">班级：{{ row.classDisplayName || '-' }}</div>
+                    <div class="meta">禁选时间：{{ row.blockedAt }}</div>
+                    <div class="stuActions">
+                      <el-button
+                        size="small"
+                        type="primary"
+                        :loading="unblockingRosterStudentId === row.studentId"
+                        @click="unblockRosterStudent(row)"
+                      >
+                        解除禁选
+                      </el-button>
+                    </div>
+                  </el-card>
+                </template>
+              </el-card>
             </el-card>
           </el-tab-pane>
 
@@ -2595,9 +2920,23 @@ async function copyLink() {
                         {{ row.latestUpdatedAt || '-' }}
                       </template>
                     </el-table-column>
-                    <el-table-column label="操作" width="220" fixed="right">
+                    <el-table-column label="完成来源" width="140">
+                      <template #default="{ row }: { row: TeacherTaskProgressStudentVO }">
+                        {{ row.completionStatus === 'CONFIRMED' ? completionSourceText(row.completionSource) : '-' }}
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="320" fixed="right">
                       <template #default="{ row }: { row: TeacherTaskProgressStudentVO }">
                         <el-button size="small" @click="openProgressDetail(row)">查看过程</el-button>
+                        <el-button
+                          v-if="row.completionStatus === 'NONE'"
+                          size="small"
+                          type="success"
+                          :loading="confirmingCompletion === row.studentId"
+                          @click="directConfirmCompletion(row)"
+                        >
+                          直接登记完成
+                        </el-button>
                         <el-button
                           v-if="row.completionStatus === 'PENDING_CONFIRM'"
                           size="small"
@@ -2625,8 +2964,18 @@ async function copyLink() {
                     <div class="meta" style="margin-top: 8px">班级：{{ row.classDisplayName || '-' }}</div>
                     <div class="meta">进度条数：{{ row.progressCount }}</div>
                     <div class="meta">最近更新时间：{{ row.latestUpdatedAt || '-' }}</div>
+                    <div v-if="row.completionStatus === 'CONFIRMED'" class="meta">登记来源：{{ completionSourceText(row.completionSource) }}</div>
                     <div class="stuActions">
                       <el-button size="small" @click="openProgressDetail(row)">查看过程</el-button>
+                      <el-button
+                        v-if="row.completionStatus === 'NONE'"
+                        size="small"
+                        type="success"
+                        :loading="confirmingCompletion === row.studentId"
+                        @click="directConfirmCompletion(row)"
+                      >
+                        直接登记完成
+                      </el-button>
                       <el-button
                         v-if="row.completionStatus === 'PENDING_CONFIRM'"
                         size="small"
@@ -3193,7 +3542,8 @@ async function copyLink() {
   <el-dialog
     v-model="experimentCourseDialog"
     :title="editingExperimentCourseId ? '编辑实验课程' : '新建实验课程'"
-    width="760px"
+    :width="isMobile ? '96vw' : '760px'"
+    top="4vh"
   >
     <el-form label-position="top">
       <el-form-item label="课程标题">
@@ -3202,7 +3552,7 @@ async function copyLink() {
       <el-form-item label="课程说明">
         <el-input v-model="experimentCourseForm.description" type="textarea" :rows="4" placeholder="填写实验课程介绍或选课说明" />
       </el-form-item>
-      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+      <div :class="isMobile ? 'mobileFormGrid' : 'dialogGridTwo'">
         <el-form-item label="学期">
           <el-select v-model="experimentCourseForm.semesterId" placeholder="选择学期" style="width: 100%">
             <el-option v-for="item in experimentCourseMeta.semesters" :key="item.id" :label="item.name" :value="item.id" />
@@ -3260,15 +3610,18 @@ async function copyLink() {
             :value="student.id"
           />
         </el-select>
+        <div class="meta" style="margin-top: 6px">
+          这里只控制“谁可以自己选课”；如果要老师直接把学生加入某个场次，请到课程详情里的“手动加入学生”操作。
+        </div>
       </el-form-item>
       <el-form-item label="可选场次">
         <div style="display: flex; flex-direction: column; gap: 10px; width: 100%">
           <div v-for="(slot, index) in experimentCourseForm.slots" :key="index" class="deviceBox">
-            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px">
+            <div :class="isMobile ? 'mobileSectionHeader' : 'desktopSectionHeader'" style="margin-bottom: 10px">
               <div class="deviceTitle">场次 {{ index + 1 }}</div>
               <el-button size="small" type="danger" plain @click="removeExperimentCourseSlot(index)">删除场次</el-button>
             </div>
-            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+            <div :class="isMobile ? 'mobileFormGrid' : 'dialogGridTwo'">
               <el-input v-model="slot.name" placeholder="场次名称（可选）" />
               <el-radio-group v-model="slot.mode">
                 <el-radio-button label="SINGLE">单次课</el-radio-button>
@@ -3283,7 +3636,7 @@ async function copyLink() {
               </el-select>
               <el-input-number v-model="slot.capacity" :min="1" :max="999" style="width: 100%" />
             </div>
-            <div v-if="slot.mode === 'RECURRING'" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px">
+            <div v-if="slot.mode === 'RECURRING'" :class="isMobile ? 'mobileFormGrid' : 'dialogGridTwo'" style="margin-top: 12px">
               <el-form-item label="重复方式" style="margin-bottom: 0">
                 <el-radio-group v-model="slot.repeatPattern">
                   <el-radio-button label="EVERY_WEEK">每周</el-radio-button>
@@ -3407,6 +3760,7 @@ async function copyLink() {
         <div>
           <div class="stuName">{{ progressDetail.studentDisplayName }}</div>
           <div class="meta">{{ progressDetail.studentUsername }} / {{ progressDetail.classDisplayName || '-' }}</div>
+          <div v-if="progressDetail.completionStatus === 'CONFIRMED'" class="meta">登记来源：{{ completionSourceText(progressDetail.completionSource) }}</div>
           <div class="meta">
             登记状态：
             <el-tag size="small" :type="completionStatusType(progressDetail.completionStatus)">{{ completionStatusText(progressDetail.completionStatus) }}</el-tag>
@@ -3416,6 +3770,25 @@ async function copyLink() {
           <div v-if="progressDetail.confirmedByDisplayName" class="meta">确认教师：{{ progressDetail.confirmedByDisplayName }}</div>
         </div>
         <div>
+          <el-button
+            v-if="progressDetail.completionStatus === 'NONE'"
+            type="success"
+            :loading="confirmingCompletion === progressDetail.studentId"
+            @click="directConfirmCompletion({
+              studentId: progressDetail.studentId,
+              studentUsername: progressDetail.studentUsername,
+              studentDisplayName: progressDetail.studentDisplayName,
+              classDisplayName: progressDetail.classDisplayName,
+              progressCount: progressDetail.logs.length,
+              completionStatus: progressDetail.completionStatus,
+              completionSource: progressDetail.completionSource,
+              latestUpdatedAt: progressDetail.logs[progressDetail.logs.length - 1]?.createdAt,
+              requestedAt: progressDetail.requestedAt,
+              confirmedAt: progressDetail.confirmedAt,
+            })"
+          >
+            直接登记完成
+          </el-button>
           <el-button
             v-if="progressDetail.completionStatus === 'PENDING_CONFIRM'"
             type="primary"
@@ -3427,6 +3800,7 @@ async function copyLink() {
               classDisplayName: progressDetail.classDisplayName,
               progressCount: progressDetail.logs.length,
               completionStatus: progressDetail.completionStatus,
+              completionSource: progressDetail.completionSource,
               latestUpdatedAt: progressDetail.logs[progressDetail.logs.length - 1]?.createdAt,
               requestedAt: progressDetail.requestedAt,
               confirmedAt: progressDetail.confirmedAt,
@@ -3831,6 +4205,37 @@ async function copyLink() {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
+.dialogGridTwo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.mobileFormGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.desktopRosterEditor {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mobileRosterEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.desktopSectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.mobileSectionHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
 .deviceBox {
   border: 1px solid #ebeef5;
   border-radius: 10px;
@@ -3877,5 +4282,10 @@ async function copyLink() {
 }
 :deep(.el-table .is-active td) {
   background: #eef6ff !important;
+}
+:root[data-ui='mobile'] .groupBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 </style>

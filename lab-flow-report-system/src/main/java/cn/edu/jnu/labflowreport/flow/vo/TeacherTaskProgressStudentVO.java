@@ -9,6 +9,7 @@ public record TeacherTaskProgressStudentVO(
         String classDisplayName,
         Integer progressCount,
         String completionStatus,
+        String completionSource,
         LocalDateTime latestUpdatedAt,
         LocalDateTime requestedAt,
         LocalDateTime confirmedAt

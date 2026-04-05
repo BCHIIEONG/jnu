@@ -16,6 +16,9 @@ public interface ExperimentCourseEnrollmentMapper extends BaseMapper<ExperimentC
     @Select("SELECT * FROM experiment_course_enrollment WHERE course_id = #{courseId} AND student_id = #{studentId} LIMIT 1")
     ExperimentCourseEnrollmentEntity findByCourseAndStudent(@Param("courseId") Long courseId, @Param("studentId") Long studentId);
 
+    @Select("SELECT * FROM experiment_course_enrollment WHERE course_id = #{courseId} AND student_id = #{studentId} LIMIT 1 FOR UPDATE")
+    ExperimentCourseEnrollmentEntity findByCourseAndStudentForUpdate(@Param("courseId") Long courseId, @Param("studentId") Long studentId);
+
     @Select("SELECT COUNT(*) FROM experiment_course_enrollment WHERE slot_id = #{slotId} AND status = 'ENROLLED'")
     Integer countEnrolledBySlotId(Long slotId);
 
@@ -96,6 +99,9 @@ public interface ExperimentCourseEnrollmentMapper extends BaseMapper<ExperimentC
 
     @Select("SELECT COUNT(*) FROM experiment_course_enrollment WHERE slot_id = #{slotId} AND student_id = #{studentId} AND status = 'ENROLLED'")
     Integer countActiveBySlotAndStudent(@Param("slotId") Long slotId, @Param("studentId") Long studentId);
+
+    @Select("SELECT * FROM experiment_course_enrollment WHERE course_id = #{courseId} AND status = 'ENROLLED' ORDER BY selected_at ASC, id ASC")
+    List<ExperimentCourseEnrollmentEntity> findActiveByCourseId(@Param("courseId") Long courseId);
 
     @Select("""
             SELECT DISTINCT u.id,

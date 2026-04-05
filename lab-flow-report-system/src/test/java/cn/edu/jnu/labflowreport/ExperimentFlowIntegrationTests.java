@@ -118,7 +118,8 @@ class ExperimentFlowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + student1Token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value("PENDING_CONFIRM"));
+                .andExpect(jsonPath("$.data.status").value("PENDING_CONFIRM"))
+                .andExpect(jsonPath("$.data.completionSource").value("STUDENT_REQUEST"));
 
         MvcResult progressList = mockMvc.perform(get("/api/teacher/tasks/" + taskId + "/progress")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
@@ -140,13 +141,29 @@ class ExperimentFlowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.completionSource").value("STUDENT_REQUEST"));
 
         mockMvc.perform(get("/api/tasks/" + taskId + "/completion/me")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + student1Token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.status").value("CONFIRMED"));
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.completionSource").value("STUDENT_REQUEST"));
+
+        mockMvc.perform(post("/api/teacher/tasks/" + taskId + "/completion/" + JsonPath.read(progressListJson, "$.data[1].studentId") + "/direct-confirm")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.completionSource").value("TEACHER_DIRECT"));
+
+        mockMvc.perform(get("/api/tasks/" + taskId + "/completion/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + student2Token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.completionSource").value("TEACHER_DIRECT"));
 
         String deviceCode = "DEV-FLOW-" + System.currentTimeMillis();
         MvcResult deviceRes = mockMvc.perform(post("/api/admin/devices")

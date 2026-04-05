@@ -70,6 +70,7 @@ type TaskCompletionVO = {
   taskId: number
   studentId: number
   status: 'NONE' | 'PENDING_CONFIRM' | 'CONFIRMED'
+  completionSource?: 'STUDENT_REQUEST' | 'TEACHER_DIRECT' | null
   requestedAt?: string | null
   confirmedAt?: string | null
   confirmedBy?: number | null
@@ -182,6 +183,8 @@ type StudentExperimentCourseVO = {
   status: 'OPEN' | 'CLOSED'
   enrollDeadlineAt: string
   enrolled: boolean
+  blocked: boolean
+  blockedReason?: string | null
   selectedSlotId?: number | null
   selectedAt?: string | null
   slots: ExperimentCourseSlotVO[]
@@ -359,6 +362,12 @@ function completionStatusType(status?: TaskCompletionVO['status']) {
   if (status === 'PENDING_CONFIRM') return 'warning'
   if (status === 'CONFIRMED') return 'success'
   return 'info'
+}
+
+function completionSourceText(source?: TaskCompletionVO['completionSource']) {
+  if (source === 'TEACHER_DIRECT') return '教师直接登记完成'
+  if (source === 'STUDENT_REQUEST') return '学生申请完成'
+  return '未登记'
 }
 
 async function loadTasks() {
@@ -1171,6 +1180,7 @@ onMounted(async () => {
                 <div class="meta">完成状态</div>
                 <el-tag :type="completionStatusType(completionInfo?.status)">{{ completionStatusText(completionInfo?.status) }}</el-tag>
               </div>
+              <div v-if="completionInfo?.status === 'CONFIRMED'" class="meta">登记来源：{{ completionSourceText(completionInfo?.completionSource) }}</div>
               <div v-if="completionInfo?.requestedAt" class="meta">申请时间：{{ completionInfo.requestedAt }}</div>
               <div v-if="completionInfo?.confirmedAt" class="meta">确认时间：{{ completionInfo.confirmedAt }}</div>
               <div v-if="completionInfo?.confirmedByDisplayName" class="meta">确认教师：{{ completionInfo.confirmedByDisplayName }}</div>
@@ -1315,12 +1325,21 @@ onMounted(async () => {
                   size="small"
                   type="primary"
                   style="margin-top: 8px"
-                  :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN'"
+                  :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN' || course.blocked"
                   :loading="enrollingCourseId === course.id"
                   @click="enrollExperimentCourse(course.id, slot.id)"
                 >
-                  {{ course.selectedSlotId === slot.id ? '已选本场次' : '选择该场次' }}
+                  {{
+                    course.blocked
+                      ? '暂不可选'
+                      : course.selectedSlotId === slot.id
+                        ? '已选本场次'
+                        : '选择该场次'
+                  }}
                 </el-button>
+                <div v-if="course.blockedReason" class="meta" style="margin-top: 6px; color: #c45656">
+                  {{ course.blockedReason }}
+                </div>
               </div>
             </div>
           </el-card>
@@ -1515,6 +1534,7 @@ onMounted(async () => {
                 </div>
               </template>
               <div class="meta">当前状态：{{ completionStatusText(completionInfo?.status) }}</div>
+              <div v-if="completionInfo?.status === 'CONFIRMED'" class="meta">登记来源：{{ completionSourceText(completionInfo?.completionSource) }}</div>
               <div v-if="completionInfo?.requestedAt" class="meta">申请时间：{{ completionInfo.requestedAt }}</div>
               <div v-if="completionInfo?.confirmedAt" class="meta">确认时间：{{ completionInfo.confirmedAt }}</div>
               <div v-if="completionInfo?.confirmedByDisplayName" class="meta">确认教师：{{ completionInfo.confirmedByDisplayName }}</div>
@@ -1663,12 +1683,21 @@ onMounted(async () => {
                       size="small"
                       type="primary"
                       style="margin-top: 8px"
-                      :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN'"
+                      :disabled="course.enrolled || course.selectedSlotId === slot.id || course.status !== 'OPEN' || course.blocked"
                       :loading="enrollingCourseId === course.id"
                       @click="enrollExperimentCourse(course.id, slot.id)"
                     >
-                      {{ course.selectedSlotId === slot.id ? '已选本场次' : '选择该场次' }}
+                      {{
+                        course.blocked
+                          ? '暂不可选'
+                          : course.selectedSlotId === slot.id
+                            ? '已选本场次'
+                            : '选择该场次'
+                      }}
                     </el-button>
+                    <div v-if="course.blockedReason" class="meta" style="margin-top: 6px; color: #c45656">
+                      {{ course.blockedReason }}
+                    </div>
                   </div>
                 </div>
               </div>

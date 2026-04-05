@@ -5,10 +5,14 @@ import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseSaveRequest;
 import cn.edu.jnu.labflowreport.elective.dto.ExperimentCourseStatusUpdateRequest;
+import cn.edu.jnu.labflowreport.elective.dto.TeacherExperimentCourseManualEnrollRequest;
+import cn.edu.jnu.labflowreport.elective.dto.TeacherExperimentCourseRemoveStudentRequest;
 import cn.edu.jnu.labflowreport.elective.service.ExperimentCourseService;
+import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseRosterVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseEnrollmentRowVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseStudentOptionVO;
 import cn.edu.jnu.labflowreport.elective.vo.ExperimentCourseVO;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -60,6 +64,36 @@ public class TeacherExperimentCourseController {
     public ApiResponse<List<ExperimentCourseEnrollmentRowVO>> listEnrollments(@PathVariable Long courseId) {
         AuthenticatedUser user = SecurityUtils.currentUser();
         return ApiResponse.success(experimentCourseService.listTeacherEnrollments(courseId, user));
+    }
+
+    @GetMapping("/experiment-courses/{courseId}/roster")
+    public ApiResponse<ExperimentCourseRosterVO> getRoster(@PathVariable Long courseId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(experimentCourseService.getTeacherCourseRoster(courseId, user));
+    }
+
+    @PostMapping("/experiment-courses/{courseId}/roster/enroll")
+    public ApiResponse<ExperimentCourseRosterVO> enrollStudent(
+            @PathVariable Long courseId,
+            @Valid @RequestBody TeacherExperimentCourseManualEnrollRequest request
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("学生已加入实验课程", experimentCourseService.teacherEnrollStudent(courseId, user, request));
+    }
+
+    @PostMapping("/experiment-courses/{courseId}/roster/remove")
+    public ApiResponse<ExperimentCourseRosterVO> removeStudent(
+            @PathVariable Long courseId,
+            @Valid @RequestBody TeacherExperimentCourseRemoveStudentRequest request
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("学生已移出实验课程", experimentCourseService.teacherRemoveStudent(courseId, user, request));
+    }
+
+    @DeleteMapping("/experiment-courses/{courseId}/blocked-students/{studentId}")
+    public ApiResponse<ExperimentCourseRosterVO> unblockStudent(@PathVariable Long courseId, @PathVariable Long studentId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("已解除禁选", experimentCourseService.unblockStudent(courseId, studentId, user));
     }
 
     @GetMapping("/experiment-courses/student-options")

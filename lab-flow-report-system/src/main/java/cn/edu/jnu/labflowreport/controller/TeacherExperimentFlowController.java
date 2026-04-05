@@ -66,6 +66,15 @@ public class TeacherExperimentFlowController {
         return ApiResponse.success("已确认登记", experimentFlowService.confirmCompletion(taskId, studentId, user));
     }
 
+    @PostMapping("/tasks/{taskId}/completion/{studentId}/direct-confirm")
+    public ApiResponse<TaskCompletionVO> directConfirmCompletion(
+            @PathVariable Long taskId,
+            @PathVariable Long studentId
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("已直接登记完成", experimentFlowService.directConfirmCompletion(taskId, studentId, user));
+    }
+
     @GetMapping("/tasks/{taskId}/devices")
     public ApiResponse<List<TaskDeviceConfigVO>> listTaskDevices(@PathVariable Long taskId) {
         AuthenticatedUser user = SecurityUtils.currentUser();

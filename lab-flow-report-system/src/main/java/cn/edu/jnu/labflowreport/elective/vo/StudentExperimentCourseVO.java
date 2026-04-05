@@ -16,6 +16,8 @@ public class StudentExperimentCourseVO {
     private String status;
     private LocalDateTime enrollDeadlineAt;
     private boolean enrolled;
+    private boolean blocked;
+    private String blockedReason;
     private Long selectedSlotId;
     private LocalDateTime selectedAt;
     private List<ExperimentCourseVO.SlotVO> slots;

@@ -469,6 +469,158 @@ class ExperimentCourseIntegrationTests {
                 .andExpect(content().string(not(containsString(notEnrolledUsername))));
     }
 
+    @Test
+    void teacherManualRosterManagementShouldControlEnrollmentBlockedStateAndVisibility() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+
+        long departmentId = createDepartment(adminToken, "实验课程手动报名院系_" + System.currentTimeMillis());
+        long classId = createClass(adminToken, departmentId, 2026, "实验课程手动报名班");
+
+        String manualUsername = "ec_manual_" + System.currentTimeMillis();
+        createUser(adminToken, manualUsername, "手动加入学生", "student123", classId, "[\"ROLE_STUDENT\"]", null);
+        String manualToken = login(manualUsername, "student123");
+        long manualStudentId = findUserId(adminToken, manualUsername);
+
+        TeacherMeta meta = loadTeacherMeta(teacherToken);
+        LocalDate lessonDate = meta.semesterStartDate().plusDays(3);
+        String courseTitle = "实验课程手动报名_" + System.currentTimeMillis();
+        String taskTitle = "实验课程手动任务_" + System.currentTimeMillis();
+
+        MvcResult createCourseResult = mockMvc.perform(post("/api/teacher/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"手动报名测试",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[%d],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "name":"手动报名场次",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                classId,
+                                lessonDate,
+                                meta.slotId(),
+                                meta.labRoomId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        long courseId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+        long slotId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].id")).longValue();
+
+        mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"手动报名联动任务",
+                                  "experimentCourseId":%d
+                                }
+                                """.formatted(taskTitle, courseId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        LocalDate weekStart = lessonDate.with(DayOfWeek.MONDAY);
+
+        mockMvc.perform(post("/api/teacher/experiment-courses/" + courseId + "/roster/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentId":%d,"slotId":%d}
+                                """.formatted(manualStudentId, slotId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enrollments[0].studentUsername").value(manualUsername))
+                .andExpect(jsonPath("$.data.enrollments[0].joinSource").value("TEACHER_MANUAL"));
+
+        mockMvc.perform(get("/api/student/experiment-courses/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(courseTitle)));
+
+        mockMvc.perform(get("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(taskTitle)));
+
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken)
+                        .param("semesterId", String.valueOf(meta.semesterId()))
+                        .param("weekStartDate", weekStart.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(courseTitle)));
+
+        mockMvc.perform(post("/api/teacher/experiment-courses/" + courseId + "/roster/remove")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentId":%d}
+                                """.formatted(manualStudentId)))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(manualUsername)));
+
+        mockMvc.perform(get("/api/student/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"blocked\":true")))
+                .andExpect(content().string(containsString("暂不可自行选课")));
+
+        mockMvc.perform(post("/api/student/experiment-courses/" + courseId + "/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"slotId":%d}
+                                """.formatted(slotId)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("你已被教师移出该实验课程，暂不可自行选课"));
+
+        mockMvc.perform(get("/api/student/experiment-courses/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(not(containsString(courseTitle))));
+
+        mockMvc.perform(get("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(not(containsString(taskTitle))));
+
+        mockMvc.perform(get("/api/student/schedule/week")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken)
+                        .param("semesterId", String.valueOf(meta.semesterId()))
+                        .param("weekStartDate", weekStart.toString()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(not(containsString(courseTitle))));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/api/teacher/experiment-courses/" + courseId + "/blocked-students/" + manualStudentId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(not(containsString(manualUsername))));
+
+        mockMvc.perform(post("/api/student/experiment-courses/" + courseId + "/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + manualToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"slotId":%d}
+                                """.formatted(slotId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.enrolled").value(true));
+    }
+
     private String login(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

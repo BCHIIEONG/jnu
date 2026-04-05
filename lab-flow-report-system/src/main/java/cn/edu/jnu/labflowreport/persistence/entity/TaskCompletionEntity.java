@@ -15,6 +15,7 @@ public class TaskCompletionEntity {
     private Long taskId;
     private Long studentId;
     private String status;
+    private String completionSource;
     private LocalDateTime requestedAt;
     private LocalDateTime confirmedAt;
     private Long confirmedBy;

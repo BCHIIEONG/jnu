@@ -6,6 +6,7 @@ public record TaskCompletionVO(
         Long taskId,
         Long studentId,
         String status,
+        String completionSource,
         LocalDateTime requestedAt,
         LocalDateTime confirmedAt,
         Long confirmedBy,

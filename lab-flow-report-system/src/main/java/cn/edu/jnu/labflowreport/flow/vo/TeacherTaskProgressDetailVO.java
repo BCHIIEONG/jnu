@@ -10,6 +10,7 @@ public record TeacherTaskProgressDetailVO(
         String studentDisplayName,
         String classDisplayName,
         String completionStatus,
+        String completionSource,
         LocalDateTime requestedAt,
         LocalDateTime confirmedAt,
         String confirmedByDisplayName,

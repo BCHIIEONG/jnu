@@ -59,6 +59,8 @@ public class ExperimentFlowService {
     private static final String COMPLETION_NONE = "NONE";
     private static final String COMPLETION_PENDING = "PENDING_CONFIRM";
     private static final String COMPLETION_CONFIRMED = "CONFIRMED";
+    private static final String COMPLETION_SOURCE_STUDENT_REQUEST = "STUDENT_REQUEST";
+    private static final String COMPLETION_SOURCE_TEACHER_DIRECT = "TEACHER_DIRECT";
     private static final Set<String> DEVICE_RESERVED_STATUSES = Set.of("PENDING", "APPROVED", "BORROWED");
 
     private final ExpTaskMapper expTaskMapper;
@@ -171,6 +173,7 @@ public class ExperimentFlowService {
         entity.setTaskId(taskId);
         entity.setStudentId(student.userId());
         entity.setStatus(COMPLETION_PENDING);
+        entity.setCompletionSource(COMPLETION_SOURCE_STUDENT_REQUEST);
         entity.setRequestedAt(LocalDateTime.now());
         taskCompletionMapper.insert(entity);
         return toCompletionVo(taskId, student.userId());
@@ -190,6 +193,7 @@ public class ExperimentFlowService {
                     classNames.get(student.getClassId()),
                     nvl(taskProgressLogMapper.countByTaskAndStudent(taskId, student.getId())),
                     completion == null ? COMPLETION_NONE : completion.getStatus(),
+                    completion == null ? null : completion.getCompletionSource(),
                     taskProgressLogMapper.findLatestCreatedAt(taskId, student.getId()),
                     completion == null ? null : completion.getRequestedAt(),
                     completion == null ? null : completion.getConfirmedAt()
@@ -216,6 +220,7 @@ public class ExperimentFlowService {
                 student.getDisplayName(),
                 loadClassDisplayName(student.getClassId()),
                 completion == null ? COMPLETION_NONE : completion.getStatus(),
+                completion == null ? null : completion.getCompletionSource(),
                 completion == null ? null : completion.getRequestedAt(),
                 completion == null ? null : completion.getConfirmedAt(),
                 completion == null ? null : resolveUserDisplayName(completion.getConfirmedBy()),
@@ -233,7 +238,38 @@ public class ExperimentFlowService {
         taskCompletionMapper.update(null, new LambdaUpdateWrapper<TaskCompletionEntity>()
                 .eq(TaskCompletionEntity::getId, completion.getId())
                 .set(TaskCompletionEntity::getStatus, COMPLETION_CONFIRMED)
+                .set(TaskCompletionEntity::getCompletionSource, normalizeCompletionSource(completion.getCompletionSource(), false))
                 .set(TaskCompletionEntity::getConfirmedAt, LocalDateTime.now())
+                .set(TaskCompletionEntity::getConfirmedBy, teacher.userId()));
+        return toCompletionVo(taskId, studentId);
+    }
+
+    @Transactional
+    public TaskCompletionVO directConfirmCompletion(Long taskId, Long studentId, AuthenticatedUser teacher) {
+        ensureTeacherCanManageTask(taskId, teacher);
+        requireStudentUser(studentId);
+        TaskCompletionEntity completion = taskCompletionMapper.findByTaskAndStudent(taskId, studentId);
+        LocalDateTime now = LocalDateTime.now();
+        if (completion == null) {
+            TaskCompletionEntity entity = new TaskCompletionEntity();
+            entity.setTaskId(taskId);
+            entity.setStudentId(studentId);
+            entity.setStatus(COMPLETION_CONFIRMED);
+            entity.setCompletionSource(COMPLETION_SOURCE_TEACHER_DIRECT);
+            entity.setRequestedAt(null);
+            entity.setConfirmedAt(now);
+            entity.setConfirmedBy(teacher.userId());
+            taskCompletionMapper.insert(entity);
+            return toCompletionVo(taskId, studentId);
+        }
+        if (COMPLETION_CONFIRMED.equals(completion.getStatus())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该任务已登记完成");
+        }
+        taskCompletionMapper.update(null, new LambdaUpdateWrapper<TaskCompletionEntity>()
+                .eq(TaskCompletionEntity::getId, completion.getId())
+                .set(TaskCompletionEntity::getStatus, COMPLETION_CONFIRMED)
+                .set(TaskCompletionEntity::getCompletionSource, normalizeCompletionSource(completion.getCompletionSource(), true))
+                .set(TaskCompletionEntity::getConfirmedAt, now)
                 .set(TaskCompletionEntity::getConfirmedBy, teacher.userId()));
         return toCompletionVo(taskId, studentId);
     }
@@ -446,17 +482,24 @@ public class ExperimentFlowService {
     private TaskCompletionVO toCompletionVo(Long taskId, Long studentId) {
         TaskCompletionEntity entity = taskCompletionMapper.findByTaskAndStudent(taskId, studentId);
         if (entity == null) {
-            return new TaskCompletionVO(taskId, studentId, COMPLETION_NONE, null, null, null, null);
+            return new TaskCompletionVO(taskId, studentId, COMPLETION_NONE, null, null, null, null, null);
         }
         return new TaskCompletionVO(
                 taskId,
                 studentId,
                 entity.getStatus(),
+                entity.getCompletionSource(),
                 entity.getRequestedAt(),
                 entity.getConfirmedAt(),
                 entity.getConfirmedBy(),
                 resolveUserDisplayName(entity.getConfirmedBy())
         );
+    }
+
+    private String normalizeCompletionSource(String source, boolean allowTeacherDirectFallback) {
+        if (COMPLETION_SOURCE_STUDENT_REQUEST.equals(source)) return COMPLETION_SOURCE_STUDENT_REQUEST;
+        if (COMPLETION_SOURCE_TEACHER_DIRECT.equals(source)) return COMPLETION_SOURCE_TEACHER_DIRECT;
+        return allowTeacherDirectFallback ? COMPLETION_SOURCE_TEACHER_DIRECT : COMPLETION_SOURCE_STUDENT_REQUEST;
     }
 
     private List<TaskDeviceConfigVO> buildTaskDeviceConfigs(Long taskId, boolean studentOnlyConfigured) {
