@@ -9,6 +9,7 @@ import { useUiStore } from '../../stores/ui'
 import QRCode from 'qrcode'
 import PlagiarismSummaryPanel from './components/PlagiarismSummaryPanel.vue'
 import LabRoomManager from '../common/LabRoomManager.vue'
+import StatisticsPanel from './components/StatisticsPanel.vue'
 
 type TaskVO = {
   id: number
@@ -322,7 +323,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'course' | 'labroom' | 'flow' | 'report' | 'schedule' | 'history'>('course')
+const activeTab = ref<'course' | 'labroom' | 'flow' | 'report' | 'schedule' | 'history' | 'stats'>('course')
 const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
@@ -2825,6 +2826,10 @@ async function copyLink() {
               </div>
             </div>
             <LabRoomManager api-base="/api/teacher/lab-rooms" />
+          </el-tab-pane>
+
+          <el-tab-pane label="统计报表" name="stats">
+            <StatisticsPanel />
           </el-tab-pane>
 
           <el-tab-pane label="实验过程管理" name="flow">

@@ -13,6 +13,7 @@ import DevicesPanel from './panels/DevicesPanel.vue'
 import SemestersPanel from './panels/SemestersPanel.vue'
 import AuditLogsPanel from './panels/AuditLogsPanel.vue'
 import BackupPanel from './panels/BackupPanel.vue'
+import StatisticsPanel from './panels/StatisticsPanel.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -36,6 +37,9 @@ function logout() {
     <el-main class="main">
       <el-card shadow="never" class="block">
         <el-tabs tab-position="top" class="tabs">
+          <el-tab-pane label="统计面板">
+            <StatisticsPanel />
+          </el-tab-pane>
           <el-tab-pane label="用户管理">
             <UsersPanel />
           </el-tab-pane>
