@@ -31,6 +31,99 @@ class ExperimentCourseIntegrationTests {
     private MockMvc mockMvc;
 
     @Test
+    void teacherShouldManageSemestersAndReceiveOutOfRangeWarning() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+
+        MvcResult createSemesterResult = mockMvc.perform(post("/api/teacher/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"教师学期管理_%d",
+                                  "startDate":"2026-09-01",
+                                  "endDate":"2027-01-20"
+                                }
+                                """.formatted(System.currentTimeMillis())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.name").exists())
+                .andExpect(jsonPath("$.data.affectedCourseCount").value(0))
+                .andReturn();
+        long semesterId = ((Number) JsonPath.read(createSemesterResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        TeacherMeta meta = loadTeacherMeta(teacherToken);
+        LocalDate lessonDate = LocalDate.of(2026, 11, 4);
+        String courseTitle = "学期越界预警_" + System.currentTimeMillis();
+
+        mockMvc.perform(post("/api/teacher/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"学期越界预警测试",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"2026-10-15T12:00:00",
+                                  "targetClassIds":[],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "name":"单次场次A",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":10
+                                    }
+                                  ]
+                                }
+                                """.formatted(courseTitle, semesterId, lessonDate, meta.slotId(), meta.labRoomId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(put("/api/teacher/semesters/" + semesterId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"教师学期管理更新_%d",
+                                  "startDate":"2026-09-01",
+                                  "endDate":"2026-10-01"
+                                }
+                                """.formatted(System.currentTimeMillis())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.hasOutOfRangeCourses").value(true))
+                .andExpect(jsonPath("$.data.affectedCourseCount").value(1))
+                .andExpect(jsonPath("$.data.affectedInstanceCount").value(1))
+                .andExpect(jsonPath("$.data.warningMessage").value(containsString("系统不会自动调整")));
+
+        mockMvc.perform(get("/api/teacher/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(content().string(containsString("教师学期管理更新_")));
+    }
+
+    @Test
+    void teacherSemesterManageShouldRequireStartAndEndDate() throws Exception {
+        String teacherToken = login("teacher", "teacher123");
+
+        mockMvc.perform(post("/api/teacher/semesters")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                                {
+                                  "name":"缺日期学期",
+                                  "startDate":null,
+                                  "endDate":"2026-12-31"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("startDate")));
+    }
+
+    @Test
     void experimentCourseShouldSupportEnrollmentTaskVisibilityAndScheduleMerge() throws Exception {
         String adminToken = login("admin", "admin123");
         String teacherToken = login("teacher", "teacher123");
@@ -931,9 +1024,22 @@ class ExperimentCourseIntegrationTests {
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
         String body = result.getResponse().getContentAsString();
-        long semesterId = ((Number) JsonPath.read(body, "$.data.semesters[0].id")).longValue();
-        String semesterStartDate = JsonPath.read(body, "$.data.semesters[0].startDate");
-        String semesterEndDate = JsonPath.read(body, "$.data.semesters[0].endDate");
+        List<java.util.Map<String, Object>> semesters = JsonPath.read(body, "$.data.semesters");
+        java.util.Map<String, Object> semester = semesters.stream()
+                .filter(item -> {
+                    String start = (String) item.get("startDate");
+                    String end = (String) item.get("endDate");
+                    if (start == null || end == null) return false;
+                    LocalDate today = LocalDate.now();
+                    LocalDate startDate = LocalDate.parse(start);
+                    LocalDate endDate = LocalDate.parse(end);
+                    return !today.isBefore(startDate) && !today.isAfter(endDate);
+                })
+                .findFirst()
+                .orElse(semesters.get(0));
+        long semesterId = ((Number) semester.get("id")).longValue();
+        String semesterStartDate = (String) semester.get("startDate");
+        String semesterEndDate = (String) semester.get("endDate");
         long slotId = ((Number) JsonPath.read(body, "$.data.timeSlots[0].id")).longValue();
         long labRoomId = ((Number) JsonPath.read(body, "$.data.labRooms[0].id")).longValue();
         return new TeacherMeta(semesterId, slotId, labRoomId, LocalDate.parse(semesterStartDate), LocalDate.parse(semesterEndDate));

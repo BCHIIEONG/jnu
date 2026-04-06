@@ -1,5 +1,8 @@
 package cn.edu.jnu.labflowreport.controller;
 
+import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterRequest;
+import cn.edu.jnu.labflowreport.admin.dto.SemesterManageResultVO;
+import cn.edu.jnu.labflowreport.admin.service.AdminResourceService;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
@@ -12,10 +15,14 @@ import cn.edu.jnu.labflowreport.schedule.vo.TimeSlotVO;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,15 +35,18 @@ public class TeacherScheduleController {
     private final ScheduleService scheduleService;
     private final SysUserMapper sysUserMapper;
     private final SemesterMapper semesterMapper;
+    private final AdminResourceService adminResourceService;
 
     public TeacherScheduleController(
             ScheduleService scheduleService,
             SysUserMapper sysUserMapper,
-            SemesterMapper semesterMapper
+            SemesterMapper semesterMapper,
+            AdminResourceService adminResourceService
     ) {
         this.scheduleService = scheduleService;
         this.sysUserMapper = sysUserMapper;
         this.semesterMapper = semesterMapper;
+        this.adminResourceService = adminResourceService;
     }
 
     @GetMapping("/semesters")
@@ -49,6 +59,18 @@ public class TeacherScheduleController {
         return ApiResponse.success(list.stream()
                 .map(s -> new TeacherSemesterVO(s.getId(), s.getName(), s.getStartDate(), s.getEndDate()))
                 .toList());
+    }
+
+    @PostMapping("/semesters")
+    public ApiResponse<SemesterManageResultVO> createSemester(@Valid @RequestBody AdminSemesterRequest request) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("创建成功", adminResourceService.createSemester(user, request));
+    }
+
+    @PutMapping("/semesters/{id}")
+    public ApiResponse<SemesterManageResultVO> updateSemester(@PathVariable Long id, @Valid @RequestBody AdminSemesterRequest request) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success("更新成功", adminResourceService.updateSemester(user, id, request));
     }
 
     @GetMapping("/time-slots")

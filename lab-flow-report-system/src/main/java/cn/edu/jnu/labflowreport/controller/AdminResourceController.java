@@ -7,6 +7,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomRequest;
 import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminRoleVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterRequest;
+import cn.edu.jnu.labflowreport.admin.dto.SemesterManageResultVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterVO;
 import cn.edu.jnu.labflowreport.admin.dto.PageResult;
 import cn.edu.jnu.labflowreport.admin.service.AdminResourceService;
@@ -127,13 +128,13 @@ public class AdminResourceController {
     }
 
     @PostMapping("/semesters")
-    public ApiResponse<AdminSemesterVO> createSemester(@Valid @RequestBody AdminSemesterRequest request) {
+    public ApiResponse<SemesterManageResultVO> createSemester(@Valid @RequestBody AdminSemesterRequest request) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
         return ApiResponse.success("创建成功", adminResourceService.createSemester(actor, request));
     }
 
     @PutMapping("/semesters/{id}")
-    public ApiResponse<AdminSemesterVO> updateSemester(@PathVariable Long id, @Valid @RequestBody AdminSemesterRequest request) {
+    public ApiResponse<SemesterManageResultVO> updateSemester(@PathVariable Long id, @Valid @RequestBody AdminSemesterRequest request) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
         return ApiResponse.success("更新成功", adminResourceService.updateSemester(actor, id, request));
     }

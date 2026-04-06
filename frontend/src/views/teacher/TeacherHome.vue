@@ -99,6 +99,18 @@ type AttendanceStaticCodeVO = { code: string }
 type TeacherClassVO = { id: number; name: string; departmentName?: string | null }
 type MetaOptionVO = { id: number; name: string; description?: string | null }
 type SemesterMetaOptionVO = { id: number; name: string; startDate: string; endDate: string }
+type SemesterManageResultVO = {
+  id: number
+  name: string
+  startDate?: string | null
+  endDate?: string | null
+  createdAt?: string
+  updatedAt?: string
+  affectedCourseCount: number
+  affectedInstanceCount: number
+  hasOutOfRangeCourses: boolean
+  warningMessage?: string | null
+}
 type ExperimentCourseSlotInstanceVO = {
   id: number
   slotGroupId: number
@@ -389,6 +401,14 @@ const experimentCourseDialog = ref(false)
 const editingExperimentCourseId = ref<number | null>(null)
 const savingExperimentCourse = ref(false)
 const experimentCourseMeta = ref<ExperimentCourseMetaVO>({ semesters: [], timeSlots: [], labRooms: [] })
+const semesterManageDialog = ref(false)
+const semesterManageSaving = ref(false)
+const semesterManageEditingId = ref<number | null>(null)
+const semesterManageForm = reactive({
+  name: '',
+  startDate: '',
+  endDate: '',
+})
 const experimentCourseStudentOptions = ref<ExperimentCourseStudentOptionVO[]>([])
 const loadingExperimentCourseStudents = ref(false)
 const loadingExperimentCourseMeta = ref(false)
@@ -1374,6 +1394,82 @@ async function loadExperimentCourseMeta() {
     ElMessage.error(e?.message ?? '加载实验课程元数据失败')
   } finally {
     loadingExperimentCourseMeta.value = false
+  }
+}
+
+function resetSemesterManageForm() {
+  semesterManageEditingId.value = null
+  semesterManageForm.name = ''
+  semesterManageForm.startDate = ''
+  semesterManageForm.endDate = ''
+}
+
+function showSemesterImpactWarning(result: SemesterManageResultVO) {
+  if (!result.hasOutOfRangeCourses) return
+  ElMessageBox.alert(
+    result.warningMessage
+    ?? `已有 ${result.affectedCourseCount} 门实验课程、${result.affectedInstanceCount} 个课次超出新学期范围，系统不会自动调整，请后续手动修正课程日期或课次设置。`,
+    '学期已更新',
+    { type: 'warning', confirmButtonText: '知道了' },
+  )
+}
+
+function openCreateSemesterDialog() {
+  resetSemesterManageForm()
+  semesterManageDialog.value = true
+}
+
+function openEditSemesterDialog() {
+  const semester = selectedExperimentSemester()
+  if (!semester) {
+    ElMessage.warning('请先选择要编辑的学期')
+    return
+  }
+  semesterManageEditingId.value = semester.id
+  semesterManageForm.name = semester.name
+  semesterManageForm.startDate = semester.startDate || ''
+  semesterManageForm.endDate = semester.endDate || ''
+  semesterManageDialog.value = true
+}
+
+async function submitSemesterDialog() {
+  if (!semesterManageForm.name.trim()) {
+    ElMessage.warning('请输入学期名称')
+    return
+  }
+  if (!semesterManageForm.startDate) {
+    ElMessage.warning('请选择学期开始日期')
+    return
+  }
+  if (!semesterManageForm.endDate) {
+    ElMessage.warning('请选择学期结束日期')
+    return
+  }
+  semesterManageSaving.value = true
+  try {
+    const result = await apiData<SemesterManageResultVO>(
+      semesterManageEditingId.value
+        ? `/api/teacher/semesters/${semesterManageEditingId.value}`
+        : '/api/teacher/semesters',
+      {
+        method: semesterManageEditingId.value ? 'PUT' : 'POST',
+        body: {
+          name: semesterManageForm.name.trim(),
+          startDate: semesterManageForm.startDate,
+          endDate: semesterManageForm.endDate,
+        },
+      },
+      auth.token,
+    )
+    await loadExperimentCourseMeta()
+    experimentCourseForm.semesterId = result.id
+    semesterManageDialog.value = false
+    ElMessage.success(semesterManageEditingId.value ? '学期已更新' : '学期已创建')
+    showSemesterImpactWarning(result)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '保存学期失败')
+  } finally {
+    semesterManageSaving.value = false
   }
 }
 
@@ -3810,9 +3906,15 @@ async function copyLink() {
       </el-form-item>
       <div :class="isMobile ? 'mobileFormGrid' : 'dialogGridTwo'">
         <el-form-item label="学期">
-          <el-select v-model="experimentCourseForm.semesterId" placeholder="选择学期" style="width: 100%">
-            <el-option v-for="item in experimentCourseMeta.semesters" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
+          <div style="display: flex; flex-direction: column; gap: 8px; width: 100%">
+            <el-select v-model="experimentCourseForm.semesterId" placeholder="选择学期" style="width: 100%">
+              <el-option v-for="item in experimentCourseMeta.semesters" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap">
+              <el-button size="small" text type="primary" @click="openCreateSemesterDialog">新增学期</el-button>
+              <el-button size="small" text type="primary" :disabled="!experimentCourseForm.semesterId" @click="openEditSemesterDialog">编辑当前学期</el-button>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="截止选课时间">
           <el-date-picker
@@ -3939,6 +4041,31 @@ async function copyLink() {
     <template #footer>
       <el-button @click="experimentCourseDialog = false">取消</el-button>
       <el-button type="primary" :loading="savingExperimentCourse" @click="saveExperimentCourse">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="semesterManageDialog"
+    :title="semesterManageEditingId ? '编辑学期' : '新建学期'"
+    :width="isMobile ? '92vw' : '520px'"
+  >
+    <el-form label-position="top">
+      <el-form-item label="学期名称">
+        <el-input v-model="semesterManageForm.name" placeholder="例如：2026-2027-1" />
+      </el-form-item>
+      <div :class="isMobile ? 'mobileFormGrid' : 'dialogGridTwo'">
+        <el-form-item label="开始日期">
+          <el-date-picker v-model="semesterManageForm.startDate" type="date" value-format="YYYY-MM-DD" placeholder="请选择开始日期" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="结束日期">
+          <el-date-picker v-model="semesterManageForm.endDate" type="date" value-format="YYYY-MM-DD" placeholder="请选择结束日期" style="width: 100%" />
+        </el-form-item>
+      </div>
+      <div class="meta">修改学期日期后，如已有实验课程或课次超出新范围，系统会允许保存并给出警告，但不会自动调整已有课程。</div>
+    </el-form>
+    <template #footer>
+      <el-button @click="semesterManageDialog = false">取消</el-button>
+      <el-button type="primary" :loading="semesterManageSaving" @click="submitSemesterDialog">保存学期</el-button>
     </template>
   </el-dialog>
 

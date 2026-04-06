@@ -9,6 +9,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomRequest;
 import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminRoleVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterRequest;
+import cn.edu.jnu.labflowreport.admin.dto.SemesterManageResultVO;
 import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterVO;
 import cn.edu.jnu.labflowreport.admin.dto.PageResult;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
@@ -17,17 +18,25 @@ import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.persistence.entity.AuditLogEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.DeviceEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseSlotInstanceEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserRoleEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.AuditLogMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.DeviceMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotInstanceMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ExperimentCourseSlotMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SemesterMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysRoleMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserRoleMapper;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +50,9 @@ public class AdminResourceService {
     private final LabRoomManagementService labRoomManagementService;
     private final DeviceMapper deviceMapper;
     private final SemesterMapper semesterMapper;
+    private final ExperimentCourseMapper experimentCourseMapper;
+    private final ExperimentCourseSlotMapper experimentCourseSlotMapper;
+    private final ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper;
     private final AuditLogMapper auditLogMapper;
     private final AdminAuditService adminAuditService;
     private final ExcelExportService excelExportService;
@@ -51,6 +63,9 @@ public class AdminResourceService {
             LabRoomManagementService labRoomManagementService,
             DeviceMapper deviceMapper,
             SemesterMapper semesterMapper,
+            ExperimentCourseMapper experimentCourseMapper,
+            ExperimentCourseSlotMapper experimentCourseSlotMapper,
+            ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper,
             AuditLogMapper auditLogMapper,
             AdminAuditService adminAuditService,
             ExcelExportService excelExportService
@@ -60,6 +75,9 @@ public class AdminResourceService {
         this.labRoomManagementService = labRoomManagementService;
         this.deviceMapper = deviceMapper;
         this.semesterMapper = semesterMapper;
+        this.experimentCourseMapper = experimentCourseMapper;
+        this.experimentCourseSlotMapper = experimentCourseSlotMapper;
+        this.experimentCourseSlotInstanceMapper = experimentCourseSlotInstanceMapper;
         this.auditLogMapper = auditLogMapper;
         this.adminAuditService = adminAuditService;
         this.excelExportService = excelExportService;
@@ -218,7 +236,8 @@ public class AdminResourceService {
     }
 
     @Transactional
-    public AdminSemesterVO createSemester(AuthenticatedUser actor, AdminSemesterRequest request) {
+    public SemesterManageResultVO createSemester(AuthenticatedUser actor, AdminSemesterRequest request) {
+        validateSemesterDates(request);
         SemesterEntity dup = semesterMapper.selectOne(new LambdaQueryWrapper<SemesterEntity>()
                 .eq(SemesterEntity::getName, request.name().trim())
                 .last("LIMIT 1"));
@@ -233,11 +252,12 @@ public class AdminResourceService {
         entity.setUpdatedAt(LocalDateTime.now());
         semesterMapper.insert(entity);
         adminAuditService.record(actor, AdminAuditActions.SEMESTER_CREATE, "semester", entity.getId(), Map.of("name", entity.getName()));
-        return new AdminSemesterVO(entity.getId(), entity.getName(), entity.getStartDate(), entity.getEndDate(), entity.getCreatedAt(), entity.getUpdatedAt());
+        return toSemesterManageResult(entity, new SemesterImpactSummary(0, 0));
     }
 
     @Transactional
-    public AdminSemesterVO updateSemester(AuthenticatedUser actor, Long id, AdminSemesterRequest request) {
+    public SemesterManageResultVO updateSemester(AuthenticatedUser actor, Long id, AdminSemesterRequest request) {
+        validateSemesterDates(request);
         SemesterEntity existing = semesterMapper.selectById(id);
         if (existing == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "学期不存在");
@@ -249,6 +269,7 @@ public class AdminResourceService {
         if (dup != null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, "学期名称已被占用");
         }
+        SemesterImpactSummary impact = calculateSemesterImpact(id, request.startDate(), request.endDate());
         semesterMapper.update(null, new LambdaUpdateWrapper<SemesterEntity>()
                 .eq(SemesterEntity::getId, id)
                 .set(SemesterEntity::getName, request.name().trim())
@@ -257,7 +278,7 @@ public class AdminResourceService {
                 .set(SemesterEntity::getUpdatedAt, LocalDateTime.now()));
         adminAuditService.record(actor, AdminAuditActions.SEMESTER_UPDATE, "semester", id, Map.of("name", request.name().trim()));
         SemesterEntity updated = semesterMapper.selectById(id);
-        return new AdminSemesterVO(updated.getId(), updated.getName(), updated.getStartDate(), updated.getEndDate(), updated.getCreatedAt(), updated.getUpdatedAt());
+        return toSemesterManageResult(updated, impact);
     }
 
     @Transactional
@@ -418,5 +439,65 @@ public class AdminResourceService {
 
     private List<?> row(Object... values) {
         return java.util.Arrays.asList(values);
+    }
+
+    private void validateSemesterDates(AdminSemesterRequest request) {
+        if (request.startDate() != null && request.endDate() != null && request.endDate().isBefore(request.startDate())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "学期结束日期不能早于开始日期");
+        }
+    }
+
+    private SemesterImpactSummary calculateSemesterImpact(Long semesterId, java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        if (startDate == null || endDate == null) {
+            return new SemesterImpactSummary(0, 0);
+        }
+        List<ExperimentCourseEntity> courses = experimentCourseMapper.selectList(
+                new LambdaQueryWrapper<ExperimentCourseEntity>().eq(ExperimentCourseEntity::getSemesterId, semesterId));
+        if (courses.isEmpty()) {
+            return new SemesterImpactSummary(0, 0);
+        }
+        Set<Long> courseIds = courses.stream().map(ExperimentCourseEntity::getId).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<ExperimentCourseSlotEntity> slots = experimentCourseSlotMapper.selectList(
+                new LambdaQueryWrapper<ExperimentCourseSlotEntity>().in(ExperimentCourseSlotEntity::getCourseId, courseIds));
+        Set<Long> affectedCourseIds = new LinkedHashSet<>();
+        for (ExperimentCourseSlotEntity slot : slots) {
+            if (slot.getFirstLessonDate() != null
+                    && (slot.getFirstLessonDate().isBefore(startDate) || slot.getFirstLessonDate().isAfter(endDate))) {
+                affectedCourseIds.add(slot.getCourseId());
+            }
+        }
+        List<ExperimentCourseSlotInstanceEntity> instances = experimentCourseSlotInstanceMapper.selectList(
+                new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>().in(ExperimentCourseSlotInstanceEntity::getCourseId, courseIds));
+        int affectedInstanceCount = 0;
+        for (ExperimentCourseSlotInstanceEntity instance : instances) {
+            if (instance.getLessonDate() != null
+                    && (instance.getLessonDate().isBefore(startDate) || instance.getLessonDate().isAfter(endDate))) {
+                affectedInstanceCount++;
+                affectedCourseIds.add(instance.getCourseId());
+            }
+        }
+        return new SemesterImpactSummary(affectedCourseIds.size(), affectedInstanceCount);
+    }
+
+    private SemesterManageResultVO toSemesterManageResult(SemesterEntity semester, SemesterImpactSummary impact) {
+        String warningMessage = impact.courseCount() > 0
+                ? "已有 " + impact.courseCount() + " 门实验课程、" + impact.instanceCount()
+                + " 个课次超出新学期范围，系统不会自动调整，请后续手动修正课程日期或课次设置。"
+                : null;
+        return new SemesterManageResultVO(
+                semester.getId(),
+                semester.getName(),
+                semester.getStartDate(),
+                semester.getEndDate(),
+                semester.getCreatedAt(),
+                semester.getUpdatedAt(),
+                impact.courseCount(),
+                impact.instanceCount(),
+                impact.courseCount() > 0,
+                warningMessage
+        );
+    }
+
+    private record SemesterImpactSummary(int courseCount, int instanceCount) {
     }
 }

@@ -5,6 +5,12 @@ import { apiData, downloadBlob } from '../../../api/http'
 import { useAuthStore } from '../../../stores/auth'
 
 type Semester = { id: number; name: string; startDate?: string | null; endDate?: string | null; createdAt: string; updatedAt: string }
+type SemesterManageResult = Semester & {
+  affectedCourseCount: number
+  affectedInstanceCount: number
+  hasOutOfRangeCourses: boolean
+  warningMessage?: string | null
+}
 
 const auth = useAuthStore()
 const token = computed(() => auth.token)
@@ -46,23 +52,39 @@ function openEdit(s: Semester) {
 async function submit() {
   try {
     if (!form.name.trim()) {
-      ElMessage.warning('name 不能为空')
+      ElMessage.warning('请输入学期名称')
+      return
+    }
+    if (!form.startDate) {
+      ElMessage.warning('请选择学期开始日期')
+      return
+    }
+    if (!form.endDate) {
+      ElMessage.warning('请选择学期结束日期')
       return
     }
     const body = {
-      name: form.name,
-      startDate: form.startDate || null,
-      endDate: form.endDate || null,
+      name: form.name.trim(),
+      startDate: form.startDate,
+      endDate: form.endDate,
     }
+    let result: SemesterManageResult
     if (editing.value) {
-      await apiData(`/api/admin/semesters/${editing.value.id}`, { method: 'PUT', body }, token.value)
+      result = await apiData<SemesterManageResult>(`/api/admin/semesters/${editing.value.id}`, { method: 'PUT', body }, token.value)
       ElMessage.success('更新成功')
     } else {
-      await apiData(`/api/admin/semesters`, { method: 'POST', body }, token.value)
+      result = await apiData<SemesterManageResult>(`/api/admin/semesters`, { method: 'POST', body }, token.value)
       ElMessage.success('创建成功')
     }
     dialog.value = false
     await load()
+    if (result.hasOutOfRangeCourses) {
+      await ElMessageBox.alert(
+        result.warningMessage ?? `已有 ${result.affectedCourseCount} 门实验课程、${result.affectedInstanceCount} 个课次超出新学期范围，系统不会自动调整，请后续手动修正课程日期或课次设置。`,
+        '学期已更新',
+        { type: 'warning', confirmButtonText: '知道了' },
+      )
+    }
   } catch (e: any) {
     ElMessage.error(e?.message ?? '提交失败')
   }
@@ -125,14 +147,14 @@ onMounted(load)
 
     <el-dialog v-model="dialog" :title="editing ? '编辑学期' : '新建学期'" width="520">
       <el-form label-width="120">
-        <el-form-item label="name">
-          <el-input v-model="form.name" placeholder="2025-2026-2" />
+        <el-form-item label="学期名称">
+          <el-input v-model="form.name" placeholder="例如：2025-2026-2" />
         </el-form-item>
-        <el-form-item label="startDate">
-          <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD" placeholder="可选" style="width: 100%" />
+        <el-form-item label="开始日期">
+          <el-date-picker v-model="form.startDate" type="date" value-format="YYYY-MM-DD" placeholder="请选择开始日期" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="endDate">
-          <el-date-picker v-model="form.endDate" type="date" value-format="YYYY-MM-DD" placeholder="可选" style="width: 100%" />
+        <el-form-item label="结束日期">
+          <el-date-picker v-model="form.endDate" type="date" value-format="YYYY-MM-DD" placeholder="请选择结束日期" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>
