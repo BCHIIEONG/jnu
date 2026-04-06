@@ -14,6 +14,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.ExportRecordEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.PlagTaskRunEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportReviewEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.ReportReviewIssueTagEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.ReportSubmissionEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskAttachmentEntity;
@@ -31,6 +32,7 @@ import cn.edu.jnu.labflowreport.persistence.mapper.PlagSubmissionBestMatchMapper
 import cn.edu.jnu.labflowreport.persistence.mapper.PlagTaskRunMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportReviewMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.ReportReviewIssueTagMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ReportSubmissionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskAttachmentMapper;
@@ -40,6 +42,7 @@ import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceRequestMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressLogMapper;
 import cn.edu.jnu.labflowreport.storage.FileStorageService;
+import cn.edu.jnu.labflowreport.workflow.ReviewIssueTags;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
@@ -71,6 +74,7 @@ public class ReportWorkflowService {
     private final ReportAttachmentMapper attachmentMapper;
     private final FileStorageService storageService;
     private final ReportReviewMapper reviewMapper;
+    private final ReportReviewIssueTagMapper reviewIssueTagMapper;
     private final ExportRecordMapper exportRecordMapper;
     private final ExpTaskTargetClassMapper taskTargetClassMapper;
     private final SysUserMapper sysUserMapper;
@@ -93,6 +97,7 @@ public class ReportWorkflowService {
             ReportAttachmentMapper attachmentMapper,
             FileStorageService storageService,
             ReportReviewMapper reviewMapper,
+            ReportReviewIssueTagMapper reviewIssueTagMapper,
             ExportRecordMapper exportRecordMapper,
             ExpTaskTargetClassMapper taskTargetClassMapper,
             SysUserMapper sysUserMapper,
@@ -114,6 +119,7 @@ public class ReportWorkflowService {
         this.attachmentMapper = attachmentMapper;
         this.storageService = storageService;
         this.reviewMapper = reviewMapper;
+        this.reviewIssueTagMapper = reviewIssueTagMapper;
         this.exportRecordMapper = exportRecordMapper;
         this.taskTargetClassMapper = taskTargetClassMapper;
         this.sysUserMapper = sysUserMapper;
@@ -506,6 +512,7 @@ public class ReportWorkflowService {
     @Transactional
     public ReviewVO reviewSubmission(Long submissionId, AuthenticatedUser teacher, ReviewCreateRequest request) {
         ensureTeacherOrAdminCanAccessSubmission(submissionId, teacher);
+        List<String> issueTags = normalizeIssueTags(request.issueTags());
 
         ReportReviewEntity review = reviewMapper.selectOne(
                 new LambdaQueryWrapper<ReportReviewEntity>()
@@ -528,6 +535,7 @@ public class ReportWorkflowService {
             review.setUpdatedAt(LocalDateTime.now());
             reviewMapper.updateById(review);
         }
+        replaceReviewIssueTags(review.getId(), issueTags);
         return getReview(submissionId, teacher);
     }
 
@@ -538,15 +546,18 @@ public class ReportWorkflowService {
         }
 
         if (user.roleCodes().contains("ROLE_ADMIN")) {
+            populateReviewIssueTags(review);
             return review;
         }
         if (user.roleCodes().contains("ROLE_TEACHER")) {
             ensureTeacherOrAdminCanAccessSubmission(submissionId, user);
+            populateReviewIssueTags(review);
             return review;
         }
 
         Long ownerId = submissionMapper.findStudentIdBySubmissionId(submissionId);
         if (ownerId != null && ownerId.equals(user.userId())) {
+            populateReviewIssueTags(review);
             return review;
         }
 
@@ -739,6 +750,39 @@ public class ReportWorkflowService {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "已超过截止时间，无法提交");
         }
         ensureStudentCanAccessTask(taskId, student.userId());
+    }
+
+    private void replaceReviewIssueTags(Long reviewId, List<String> issueTags) {
+        reviewIssueTagMapper.delete(new LambdaQueryWrapper<ReportReviewIssueTagEntity>()
+                .eq(ReportReviewIssueTagEntity::getReviewId, reviewId));
+        LocalDateTime now = LocalDateTime.now();
+        for (String code : issueTags) {
+            ReportReviewIssueTagEntity entity = new ReportReviewIssueTagEntity();
+            entity.setReviewId(reviewId);
+            entity.setTagCode(code);
+            entity.setCreatedAt(now);
+            reviewIssueTagMapper.insert(entity);
+        }
+    }
+
+    private void populateReviewIssueTags(ReviewVO review) {
+        if (review == null || review.getId() == null) {
+            return;
+        }
+        review.setIssueTags(reviewIssueTagMapper.findTagCodesByReviewId(review.getId()));
+    }
+
+    private List<String> normalizeIssueTags(List<String> issueTags) {
+        if (issueTags == null || issueTags.isEmpty()) {
+            return List.of();
+        }
+        return issueTags.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(code -> !code.isEmpty())
+                .filter(ReviewIssueTags.codes()::contains)
+                .distinct()
+                .toList();
     }
 
     void ensureTeacherOrAdminCanManageTask(Long taskId, AuthenticatedUser actor) {

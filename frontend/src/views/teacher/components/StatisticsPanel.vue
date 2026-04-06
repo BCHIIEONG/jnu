@@ -16,7 +16,7 @@ type SemesterOption = {
 type ChartSeries = {
   name: string
   type: string
-  data: number[]
+  data: Array<number | null>
 }
 
 type ChartData = {

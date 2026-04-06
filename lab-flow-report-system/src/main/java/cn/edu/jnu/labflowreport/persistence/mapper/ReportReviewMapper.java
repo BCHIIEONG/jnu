@@ -24,4 +24,3 @@ public interface ReportReviewMapper extends BaseMapper<ReportReviewEntity> {
             """)
     ReviewVO findReviewBySubmissionId(Long submissionId);
 }
-

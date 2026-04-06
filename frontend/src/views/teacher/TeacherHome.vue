@@ -11,6 +11,7 @@ import PlagiarismSummaryPanel from './components/PlagiarismSummaryPanel.vue'
 import LabRoomManager from '../common/LabRoomManager.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
 import TaskDiscussionPanel from '../common/TaskDiscussionPanel.vue'
+import TeachingAnalyticsPanel from '../common/TeachingAnalyticsPanel.vue'
 
 type TaskVO = {
   id: number
@@ -43,6 +44,16 @@ type SubmissionVO = {
   versionNo: number
   contentMd: string
   submittedAt: string
+}
+
+type ReviewVO = {
+  id: number
+  submissionId: number
+  teacherDisplayName?: string
+  score: number
+  comment?: string | null
+  reviewedAt: string
+  issueTags?: string[]
 }
 
 type AttachmentVO = {
@@ -351,7 +362,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'course' | 'labroom' | 'discussion' | 'flow' | 'report' | 'schedule' | 'history' | 'stats'>('course')
+const activeTab = ref<'course' | 'labroom' | 'discussion' | 'flow' | 'report' | 'schedule' | 'history' | 'stats' | 'analytics'>('course')
 const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
@@ -435,9 +446,21 @@ const experimentCourseForm = reactive({
 
 const reviewDialog = ref(false)
 const reviewTarget = ref<SubmissionVO | null>(null)
+const reviewIssueOptions = [
+  { code: 'FORMAT', label: '格式不规范' },
+  { code: 'STEPS', label: '实验步骤不完整' },
+  { code: 'ANALYSIS', label: '结果分析不足' },
+  { code: 'CONCLUSION', label: '结论不清晰' },
+  { code: 'DATA', label: '数据异常' },
+  { code: 'CHART', label: '图表缺失或错误' },
+  { code: 'CODE', label: '代码/原理错误' },
+  { code: 'PLAGIARISM', label: '抄袭疑似' },
+  { code: 'OTHER', label: '其他' },
+]
 const reviewForm = reactive({
   score: 95,
   comment: '完成很好',
+  issueTags: [] as string[],
 })
 const reviewing = ref(false)
 
@@ -2041,8 +2064,23 @@ watch(selectedExperimentCourseId, async () => {
   await loadExperimentCourseEnrollments()
 })
 
-function openReview(row: SubmissionVO) {
+async function openReview(row: SubmissionVO) {
   reviewTarget.value = row
+  reviewForm.score = 95
+  reviewForm.comment = '完成很好'
+  reviewForm.issueTags = []
+  try {
+    const current = await apiData<ReviewVO>(
+      `/api/submissions/${row.id}/review`,
+      { method: 'GET' },
+      auth.token,
+    )
+    reviewForm.score = current.score ?? reviewForm.score
+    reviewForm.comment = current.comment ?? ''
+    reviewForm.issueTags = [...(current.issueTags || [])]
+  } catch {
+    // 未批阅时保持默认值
+  }
   reviewDialog.value = true
 }
 
@@ -2147,7 +2185,7 @@ async function submitReview() {
   try {
     await apiData(
       `/api/submissions/${reviewTarget.value.id}/review`,
-      { method: 'POST', body: { score: reviewForm.score, comment: reviewForm.comment } },
+      { method: 'POST', body: { score: reviewForm.score, comment: reviewForm.comment, issueTags: reviewForm.issueTags } },
       auth.token,
     )
     ElMessage.success('批阅成功')
@@ -3162,6 +3200,10 @@ async function copyLink() {
             <StatisticsPanel />
           </el-tab-pane>
 
+          <el-tab-pane label="教学分析" name="analytics">
+            <TeachingAnalyticsPanel mode="teacher" />
+          </el-tab-pane>
+
           <el-tab-pane label="实验过程管理" name="flow">
             <el-card v-if="isMobile" class="block" shadow="never">
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -4076,6 +4118,11 @@ async function copyLink() {
     <el-form label-position="top">
       <el-form-item label="分数（0-100）">
         <el-input-number v-model="reviewForm.score" :min="0" :max="100" :step="0.5" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="问题标签">
+        <el-select v-model="reviewForm.issueTags" multiple collapse-tags collapse-tags-tooltip placeholder="选择问题标签" style="width: 100%">
+          <el-option v-for="item in reviewIssueOptions" :key="item.code" :label="item.label" :value="item.code" />
+        </el-select>
       </el-form-item>
       <el-form-item label="评语">
         <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="写一句评价即可" />

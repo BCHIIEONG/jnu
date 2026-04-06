@@ -5,10 +5,11 @@ import { apiData, downloadBlob } from '../../../api/http'
 import { useAuthStore } from '../../../stores/auth'
 import { useUiStore } from '../../../stores/ui'
 import StatsChart from '../../common/StatsChart.vue'
+import TeachingAnalyticsPanel from '../../common/TeachingAnalyticsPanel.vue'
 
 type Option = { id: number; label: string }
 type SemesterOption = { id: number; name: string; startDate: string; endDate: string }
-type ChartSeries = { name: string; type: string; data: number[] }
+type ChartSeries = { name: string; type: string; data: Array<number | null> }
 type ChartData = { categories: string[]; series: ChartSeries[] }
 
 type Dashboard = {
@@ -74,6 +75,7 @@ type Dashboard = {
 const auth = useAuthStore()
 const ui = useUiStore()
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
+const activeSubTab = ref<'overview' | 'teaching'>('overview')
 const loading = ref(false)
 const dashboard = ref<Dashboard | null>(null)
 const query = reactive({
@@ -165,8 +167,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="statsPanel" v-loading="loading">
-    <el-card shadow="never">
+  <el-tabs v-model="activeSubTab" class="innerTabs">
+    <el-tab-pane label="综合统计" name="overview">
+      <div class="statsPanel" v-loading="loading">
+        <el-card shadow="never">
       <div :class="isMobile ? 'filterStack' : 'filterRow'">
         <el-select v-model="query.semesterId" placeholder="选择学期" clearable :style="isMobile ? 'width: 100%' : 'width: 180px'">
           <el-option v-for="item in dashboard?.filters.semesters || []" :key="item.id" :label="item.name" :value="item.id" />
@@ -282,11 +286,20 @@ onMounted(async () => {
           <div class="mobileStatMeta">有效报名 {{ row.activeEnrollmentCount }} / 场次数 {{ row.slotCount }} / 签到场次 {{ row.attendanceSessionCount }}</div>
         </el-card>
       </div>
-    </el-card>
-  </div>
+        </el-card>
+      </div>
+    </el-tab-pane>
+    <el-tab-pane label="教学分析" name="teaching">
+      <TeachingAnalyticsPanel mode="admin" />
+    </el-tab-pane>
+  </el-tabs>
 </template>
 
 <style scoped>
+.innerTabs :deep(.el-tabs__content) {
+  padding-top: 10px;
+}
+
 .statsPanel {
   display: flex;
   flex-direction: column;

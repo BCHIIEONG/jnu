@@ -124,6 +124,19 @@ type ReviewVO = {
   score: number
   comment?: string | null
   reviewedAt: string
+  issueTags?: string[]
+}
+
+const reviewIssueLabelMap: Record<string, string> = {
+  FORMAT: '格式不规范',
+  STEPS: '实验步骤不完整',
+  ANALYSIS: '结果分析不足',
+  CONCLUSION: '结论不清晰',
+  DATA: '数据异常',
+  CHART: '图表缺失或错误',
+  CODE: '代码/原理错误',
+  PLAGIARISM: '抄袭疑似',
+  OTHER: '其他',
 }
 
 type Semester = { id: number; name: string; startDate?: string | null; endDate?: string | null }
@@ -2006,6 +2019,13 @@ onBeforeUnmount(() => {
       <div class="meta">时间：{{ currentReview.reviewedAt }}</div>
       <div style="margin-top: 10px; font-size: 16px">
         分数：<b>{{ currentReview.score }}</b>
+      </div>
+      <div style="margin-top: 10px">
+        问题标签：
+        <template v-if="currentReview.issueTags && currentReview.issueTags.length">
+          {{ currentReview.issueTags.map((item) => reviewIssueLabelMap[item] || item).join('、') }}
+        </template>
+        <template v-else>（无）</template>
       </div>
       <div style="margin-top: 10px; white-space: pre-wrap">评语：{{ currentReview.comment || '（无）' }}</div>
     </div>

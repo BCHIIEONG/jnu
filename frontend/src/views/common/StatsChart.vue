@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 type ChartSeries = {
   name: string
   type: string
-  data: number[]
+  data: Array<number | null>
 }
 
 type ChartData = {
