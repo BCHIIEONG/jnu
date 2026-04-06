@@ -8,6 +8,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminDepartmentRequest;
 import cn.edu.jnu.labflowreport.admin.dto.AdminDepartmentVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
@@ -39,6 +40,7 @@ public class AdminOrgService {
     private final SysUserClassMapper sysUserClassMapper;
     private final CourseScheduleMapper courseScheduleMapper;
     private final AdminAuditService adminAuditService;
+    private final ExcelExportService excelExportService;
 
     public AdminOrgService(
             OrgDepartmentMapper orgDepartmentMapper,
@@ -46,7 +48,8 @@ public class AdminOrgService {
             SysUserMapper sysUserMapper,
             SysUserClassMapper sysUserClassMapper,
             CourseScheduleMapper courseScheduleMapper,
-            AdminAuditService adminAuditService
+            AdminAuditService adminAuditService,
+            ExcelExportService excelExportService
     ) {
         this.orgDepartmentMapper = orgDepartmentMapper;
         this.orgClassMapper = orgClassMapper;
@@ -54,6 +57,7 @@ public class AdminOrgService {
         this.sysUserClassMapper = sysUserClassMapper;
         this.courseScheduleMapper = courseScheduleMapper;
         this.adminAuditService = adminAuditService;
+        this.excelExportService = excelExportService;
     }
 
     public List<AdminDepartmentVO> listDepartments() {
@@ -267,6 +271,38 @@ public class AdminOrgService {
         return csv.toString();
     }
 
+    public byte[] exportDepartmentsExcel(AuthenticatedUser actor) {
+        List<OrgDepartmentEntity> deps = orgDepartmentMapper.selectList(new LambdaQueryWrapper<OrgDepartmentEntity>().orderByAsc(OrgDepartmentEntity::getId));
+        var departmentRows = deps.stream()
+                .map(d -> row(d.getId(), d.getName(), d.getCreatedAt(), d.getUpdatedAt()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "院系",
+                        List.of("ID", "名称", "创建时间", "更新时间"),
+                        departmentRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.DEPARTMENT_EXPORT, "org_department", null, Map.of("count", deps.size(), "format", "excel"));
+        return bytes;
+    }
+
+    public byte[] exportClassesExcel(AuthenticatedUser actor) {
+        List<AdminClassVO> classes = listClasses(null, null, null);
+        var classRows = classes.stream()
+                .map(c -> row(c.id(), c.departmentId(), c.departmentName(), c.grade(), c.name(), c.displayName(), c.createdAt(), c.updatedAt()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "班级",
+                        List.of("ID", "院系ID", "院系名称", "年级", "名称", "展示名", "创建时间", "更新时间"),
+                        classRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.CLASS_EXPORT, "org_class", null, Map.of("count", classes.size(), "format", "excel"));
+        return bytes;
+    }
+
     private AdminClassVO toClassVO(OrgClassEntity entity, String departmentName) {
         Integer effectiveGrade = ClassDisplayUtils.effectiveGrade(entity.getGrade(), entity.getName());
         return new AdminClassVO(
@@ -279,5 +315,9 @@ public class AdminOrgService {
                 entity.getCreatedAt(),
                 entity.getUpdatedAt()
         );
+    }
+
+    private List<?> row(Object... values) {
+        return java.util.Arrays.asList(values);
     }
 }

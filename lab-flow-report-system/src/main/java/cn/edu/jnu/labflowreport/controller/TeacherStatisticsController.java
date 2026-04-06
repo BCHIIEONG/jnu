@@ -3,14 +3,11 @@ package cn.edu.jnu.labflowreport.controller;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import cn.edu.jnu.labflowreport.statistics.service.StatisticsService;
 import cn.edu.jnu.labflowreport.statistics.vo.TeacherStatisticsDashboardVO;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,7 +43,7 @@ public class TeacherStatisticsController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) throws Exception {
         AuthenticatedUser user = SecurityUtils.currentUser();
-        return csvResponse("teacher-task-stats.csv", statisticsService.exportTeacherTaskStatsCsv(user, semesterId, from, to));
+        return ExportResponseHelper.csv("teacher-task-stats.csv", statisticsService.exportTeacherTaskStatsCsv(user, semesterId, from, to));
     }
 
     @GetMapping("/reports/experiment-courses/export")
@@ -56,7 +53,7 @@ public class TeacherStatisticsController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) throws Exception {
         AuthenticatedUser user = SecurityUtils.currentUser();
-        return csvResponse("teacher-experiment-course-stats.csv", statisticsService.exportTeacherExperimentCourseStatsCsv(user, semesterId, from, to));
+        return ExportResponseHelper.csv("teacher-experiment-course-stats.csv", statisticsService.exportTeacherExperimentCourseStatsCsv(user, semesterId, from, to));
     }
 
     @GetMapping("/reports/device-requests/export")
@@ -66,19 +63,36 @@ public class TeacherStatisticsController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) throws Exception {
         AuthenticatedUser user = SecurityUtils.currentUser();
-        return csvResponse("teacher-device-request-stats.csv", statisticsService.exportTeacherDeviceRequestStatsCsv(user, semesterId, from, to));
+        return ExportResponseHelper.csv("teacher-device-request-stats.csv", statisticsService.exportTeacherDeviceRequestStatsCsv(user, semesterId, from, to));
     }
 
-    private ResponseEntity<byte[]> csvResponse(String filename, String csv) throws Exception {
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .body(out.toByteArray());
+    @GetMapping("/reports/tasks/export/excel")
+    public ResponseEntity<byte[]> exportTasksExcel(
+            @RequestParam(required = false) Long semesterId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("teacher-task-stats.xlsx", statisticsService.exportTeacherTaskStatsExcel(user, semesterId, from, to));
+    }
+
+    @GetMapping("/reports/experiment-courses/export/excel")
+    public ResponseEntity<byte[]> exportExperimentCoursesExcel(
+            @RequestParam(required = false) Long semesterId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("teacher-experiment-course-stats.xlsx", statisticsService.exportTeacherExperimentCourseStatsExcel(user, semesterId, from, to));
+    }
+
+    @GetMapping("/reports/device-requests/export/excel")
+    public ResponseEntity<byte[]> exportDeviceRequestsExcel(
+            @RequestParam(required = false) Long semesterId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("teacher-device-request-stats.xlsx", statisticsService.exportTeacherDeviceRequestStatsExcel(user, semesterId, from, to));
     }
 }

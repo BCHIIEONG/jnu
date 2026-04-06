@@ -21,15 +21,22 @@ async function dl(path: string, filename: string) {
   <div class="panel">
     <div class="grid">
       <el-card shadow="never">
-        <template #header>数据导出（CSV）</template>
+        <template #header>数据导出（CSV / Excel）</template>
         <div class="btns">
           <el-button @click="dl('/api/admin/users/export', 'users.csv')">导出用户</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/users/export/excel', 'users.xlsx')">用户 Excel</el-button>
           <el-button @click="dl('/api/admin/devices/export', 'devices.csv')">导出设备</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/devices/export/excel', 'devices.xlsx')">设备 Excel</el-button>
           <el-button @click="dl('/api/admin/departments/export', 'departments.csv')">导出院系</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/departments/export/excel', 'departments.xlsx')">院系 Excel</el-button>
           <el-button @click="dl('/api/admin/classes/export', 'classes.csv')">导出班级</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/classes/export/excel', 'classes.xlsx')">班级 Excel</el-button>
           <el-button @click="dl('/api/admin/lab-rooms/export', 'lab-rooms.csv')">导出实验室</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/lab-rooms/export/excel', 'lab-rooms.xlsx')">实验室 Excel</el-button>
           <el-button @click="dl('/api/admin/semesters/export', 'semesters.csv')">导出学期</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/semesters/export/excel', 'semesters.xlsx')">学期 Excel</el-button>
           <el-button @click="dl('/api/admin/audit-logs/export', 'audit-logs.csv')">导出操作日志</el-button>
+          <el-button type="primary" plain @click="dl('/api/admin/audit-logs/export/excel', 'audit-logs.xlsx')">日志 Excel</el-button>
         </div>
       </el-card>
 

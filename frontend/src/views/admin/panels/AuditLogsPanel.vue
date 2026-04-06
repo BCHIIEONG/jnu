@@ -69,6 +69,18 @@ async function exportCsv() {
   }
 }
 
+async function exportExcel() {
+  try {
+    await downloadBlob(`/api/admin/audit-logs/export/excel?${buildQuery(false)}`, {
+      token: token.value,
+      fallbackFilename: 'audit-logs.xlsx',
+    })
+    ElMessage.success('已下载 audit-logs.xlsx')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '导出失败')
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -96,6 +108,7 @@ onMounted(load)
       />
       <el-button type="primary" :loading="loading" @click="() => { query.page = 1; load() }">查询</el-button>
       <el-button @click="exportCsv">导出 CSV</el-button>
+      <el-button type="primary" plain @click="exportExcel">导出 Excel</el-button>
     </div>
 
     <el-table :data="data.items" v-loading="loading" stripe height="520">
@@ -156,4 +169,3 @@ onMounted(load)
   color: #888;
 }
 </style>
-

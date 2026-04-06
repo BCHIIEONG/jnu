@@ -3,6 +3,7 @@ package cn.edu.jnu.labflowreport.controller;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import cn.edu.jnu.labflowreport.flow.dto.TaskDeviceConfigItemRequest;
 import cn.edu.jnu.labflowreport.flow.service.ExperimentFlowService;
 import cn.edu.jnu.labflowreport.flow.vo.TaskCompletionVO;
@@ -11,12 +12,7 @@ import cn.edu.jnu.labflowreport.flow.vo.TaskDeviceRequestVO;
 import cn.edu.jnu.labflowreport.flow.vo.TeacherTaskProgressDetailVO;
 import cn.edu.jnu.labflowreport.flow.vo.TeacherTaskProgressStudentVO;
 import jakarta.validation.Valid;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -125,18 +121,14 @@ public class TeacherExperimentFlowController {
     }
 
     @GetMapping("/tasks/{taskId}/device-requests/export")
-    public ResponseEntity<byte[]> exportTaskDeviceRequests(@PathVariable Long taskId) throws IOException {
+    public ResponseEntity<byte[]> exportTaskDeviceRequests(@PathVariable Long taskId) throws Exception {
         AuthenticatedUser user = SecurityUtils.currentUser();
-        String csv = experimentFlowService.exportTaskDeviceRequestsCsv(taskId, user);
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"task-" + taskId + "-device-requests.csv\"")
-                .body(out.toByteArray());
+        return ExportResponseHelper.csv("task-" + taskId + "-device-requests.csv", experimentFlowService.exportTaskDeviceRequestsCsv(taskId, user));
+    }
+
+    @GetMapping("/tasks/{taskId}/device-requests/export/excel")
+    public ResponseEntity<byte[]> exportTaskDeviceRequestsExcel(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("task-" + taskId + "-device-requests.xlsx", experimentFlowService.exportTaskDeviceRequestsExcel(taskId, user));
     }
 }

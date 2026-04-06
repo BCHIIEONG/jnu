@@ -13,6 +13,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminSemesterVO;
 import cn.edu.jnu.labflowreport.admin.dto.PageResult;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.persistence.entity.AuditLogEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.DeviceEntity;
@@ -42,6 +43,7 @@ public class AdminResourceService {
     private final SemesterMapper semesterMapper;
     private final AuditLogMapper auditLogMapper;
     private final AdminAuditService adminAuditService;
+    private final ExcelExportService excelExportService;
 
     public AdminResourceService(
             SysRoleMapper sysRoleMapper,
@@ -50,7 +52,8 @@ public class AdminResourceService {
             DeviceMapper deviceMapper,
             SemesterMapper semesterMapper,
             AuditLogMapper auditLogMapper,
-            AdminAuditService adminAuditService
+            AdminAuditService adminAuditService,
+            ExcelExportService excelExportService
     ) {
         this.sysRoleMapper = sysRoleMapper;
         this.sysUserRoleMapper = sysUserRoleMapper;
@@ -59,6 +62,7 @@ public class AdminResourceService {
         this.semesterMapper = semesterMapper;
         this.auditLogMapper = auditLogMapper;
         this.adminAuditService = adminAuditService;
+        this.excelExportService = excelExportService;
     }
 
     public List<AdminRoleVO> listRoles() {
@@ -94,6 +98,10 @@ public class AdminResourceService {
 
     public String exportLabRoomsCsv(AuthenticatedUser actor) {
         return labRoomManagementService.exportLabRoomsCsv(actor);
+    }
+
+    public byte[] exportLabRoomsExcel(AuthenticatedUser actor) {
+        return labRoomManagementService.exportLabRoomsExcel(actor);
     }
 
     public List<AdminDeviceVO> listDevices(String q, String status) {
@@ -186,6 +194,22 @@ public class AdminResourceService {
         return csv.toString();
     }
 
+    public byte[] exportDevicesExcel(AuthenticatedUser actor) {
+        List<AdminDeviceVO> devices = listDevices(null, null);
+        var deviceRows = devices.stream()
+                .map(d -> row(d.id(), d.code(), d.name(), d.totalQuantity(), d.status(), d.location(), d.description(), d.createdAt(), d.updatedAt()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "设备",
+                        List.of("ID", "编码", "名称", "总数量", "状态", "位置", "描述", "创建时间", "更新时间"),
+                        deviceRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.DEVICE_EXPORT, "device", null, Map.of("count", devices.size(), "format", "excel"));
+        return bytes;
+    }
+
     public List<AdminSemesterVO> listSemesters() {
         return semesterMapper.selectList(new LambdaQueryWrapper<SemesterEntity>().orderByAsc(SemesterEntity::getId))
                 .stream()
@@ -259,6 +283,22 @@ public class AdminResourceService {
         }
         adminAuditService.record(actor, AdminAuditActions.SEMESTER_EXPORT, "semester", null, Map.of("count", semesters.size()));
         return csv.toString();
+    }
+
+    public byte[] exportSemestersExcel(AuthenticatedUser actor) {
+        List<AdminSemesterVO> semesters = listSemesters();
+        var semesterRows = semesters.stream()
+                .map(s -> row(s.id(), s.name(), s.startDate(), s.endDate(), s.createdAt(), s.updatedAt()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "学期",
+                        List.of("ID", "名称", "开始日期", "结束日期", "创建时间", "更新时间"),
+                        semesterRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.SEMESTER_EXPORT, "semester", null, Map.of("count", semesters.size(), "format", "excel"));
+        return bytes;
     }
 
     public PageResult<AdminAuditLogVO> listAuditLogs(
@@ -339,5 +379,44 @@ public class AdminResourceService {
         }
         adminAuditService.record(actor, AdminAuditActions.AUDIT_EXPORT, "audit_log", null, Map.of("count", items.size()));
         return csv.toString();
+    }
+
+    public byte[] exportAuditLogsExcel(AuthenticatedUser actor, String action, String actorUsername, String targetType, LocalDateTime from, LocalDateTime to) {
+        LambdaQueryWrapper<AuditLogEntity> w = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(action)) {
+            w.eq(AuditLogEntity::getAction, action.trim());
+        }
+        if (StringUtils.hasText(actorUsername)) {
+            w.like(AuditLogEntity::getActorUsername, actorUsername.trim());
+        }
+        if (StringUtils.hasText(targetType)) {
+            w.eq(AuditLogEntity::getTargetType, targetType.trim());
+        }
+        if (from != null) {
+            w.ge(AuditLogEntity::getCreatedAt, from);
+        }
+        if (to != null) {
+            w.le(AuditLogEntity::getCreatedAt, to);
+        }
+        List<AuditLogEntity> logs = auditLogMapper.selectList(w.orderByDesc(AuditLogEntity::getId));
+        List<AdminAuditLogVO> items = logs.stream()
+                .map(l -> new AdminAuditLogVO(l.getId(), l.getActorId(), l.getActorUsername(), l.getAction(), l.getTargetType(), l.getTargetId(), l.getDetailJson(), l.getCreatedAt()))
+                .toList();
+        var auditRows = items.stream()
+                .map(l -> row(l.id(), l.actorId(), l.actorUsername(), l.action(), l.targetType(), l.targetId(), l.detailJson(), l.createdAt()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "审计日志",
+                        List.of("ID", "操作者ID", "操作者用户名", "动作", "目标类型", "目标ID", "明细JSON", "创建时间"),
+                        auditRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.AUDIT_EXPORT, "audit_log", null, Map.of("count", items.size(), "format", "excel"));
+        return bytes;
+    }
+
+    private List<?> row(Object... values) {
+        return java.util.Arrays.asList(values);
     }
 }

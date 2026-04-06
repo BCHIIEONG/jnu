@@ -26,6 +26,8 @@ const props = defineProps<{
   apiBase: string
   exportPath?: string
   exportFilename?: string
+  exportExcelPath?: string
+  exportExcelFilename?: string
 }>()
 
 const auth = useAuthStore()
@@ -161,6 +163,19 @@ async function exportCsv() {
   }
 }
 
+async function exportExcel() {
+  if (!props.exportExcelPath) return
+  try {
+    await downloadBlob(props.exportExcelPath, {
+      token: token.value,
+      fallbackFilename: props.exportExcelFilename || 'lab-rooms.xlsx',
+    })
+    ElMessage.success('实验室 Excel 已下载')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '导出失败')
+  }
+}
+
 function weekdayLabel(weekday: number) {
   return weekdayOptions.find((item) => item.value === weekday)?.label || `周${weekday}`
 }
@@ -173,6 +188,7 @@ onMounted(load)
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建实验室</el-button>
       <el-button v-if="exportPath" @click="exportCsv">导出 CSV</el-button>
+      <el-button v-if="exportExcelPath" type="primary" plain @click="exportExcel">导出 Excel</el-button>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
 

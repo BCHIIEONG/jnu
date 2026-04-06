@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.common.util.HashUtils;
@@ -74,6 +75,7 @@ public class ExperimentFlowService {
     private final TaskDeviceConfigMapper taskDeviceConfigMapper;
     private final TaskDeviceRequestMapper taskDeviceRequestMapper;
     private final FileStorageService fileStorageService;
+    private final ExcelExportService excelExportService;
 
     public ExperimentFlowService(
             ExpTaskMapper expTaskMapper,
@@ -86,7 +88,8 @@ public class ExperimentFlowService {
             TaskCompletionMapper taskCompletionMapper,
             TaskDeviceConfigMapper taskDeviceConfigMapper,
             TaskDeviceRequestMapper taskDeviceRequestMapper,
-            FileStorageService fileStorageService
+            FileStorageService fileStorageService,
+            ExcelExportService excelExportService
     ) {
         this.expTaskMapper = expTaskMapper;
         this.expTaskTargetClassMapper = expTaskTargetClassMapper;
@@ -99,6 +102,7 @@ public class ExperimentFlowService {
         this.taskDeviceConfigMapper = taskDeviceConfigMapper;
         this.taskDeviceRequestMapper = taskDeviceRequestMapper;
         this.fileStorageService = fileStorageService;
+        this.excelExportService = excelExportService;
     }
 
     public List<TaskProgressVO> listMyProgress(Long taskId, AuthenticatedUser student) {
@@ -430,6 +434,117 @@ public class ExperimentFlowService {
         return csv.toString();
     }
 
+    public byte[] exportTaskDeviceRequestsExcel(Long taskId, AuthenticatedUser teacher) {
+        ensureTeacherCanManageTask(taskId, teacher);
+        ExpTaskEntity task = requireTask(taskId);
+        List<TeacherTaskProgressStudentVO> progressStudents = listTeacherTaskProgress(taskId, teacher, null);
+        List<List<?>> progressRows = new ArrayList<>();
+        List<List<?>> completionRows = new ArrayList<>();
+        for (TeacherTaskProgressStudentVO student : progressStudents) {
+            TeacherTaskProgressDetailVO detail = getTeacherTaskProgressDetail(taskId, student.studentId(), teacher);
+            completionRows.add(row(
+                    task.getTitle(),
+                    student.studentDisplayName(),
+                    student.studentUsername(),
+                    student.classDisplayName(),
+                    detail.completionStatus(),
+                    detail.completionSource(),
+                    detail.requestedAt(),
+                    detail.confirmedAt(),
+                    detail.confirmedByDisplayName()
+            ));
+            for (TaskProgressVO log : detail.logs()) {
+                String attachmentNames = log.attachments().stream()
+                        .map(ProgressAttachmentVO::fileName)
+                        .collect(Collectors.joining(" | "));
+                progressRows.add(row(
+                        task.getTitle(),
+                        student.studentDisplayName(),
+                        student.studentUsername(),
+                        student.classDisplayName(),
+                        log.stepNo(),
+                        log.content(),
+                        attachmentNames,
+                        log.createdAt()
+                ));
+            }
+        }
+
+        List<TaskDeviceRequestVO> requests = listTeacherDeviceRequests(taskId, teacher, null, null);
+        Map<Long, TaskDeviceRequestEntity> requestEntities = taskDeviceRequestMapper.selectList(
+                        new LambdaQueryWrapper<TaskDeviceRequestEntity>().eq(TaskDeviceRequestEntity::getTaskId, taskId))
+                .stream()
+                .collect(Collectors.toMap(TaskDeviceRequestEntity::getId, item -> item));
+        var requestRows = requests.stream()
+                .map(item -> row(
+                        task.getTitle(),
+                        item.studentDisplayName(),
+                        item.studentUsername(),
+                        item.deviceCode(),
+                        item.deviceName(),
+                        item.quantity(),
+                        item.status(),
+                        item.note(),
+                        item.createdAt()
+                ))
+                .toList();
+        var flowRows = requests.stream()
+                .map(row -> {
+                    TaskDeviceRequestEntity entity = requestEntities.get(row.id());
+                    return row(
+                            task.getTitle(),
+                            row.studentDisplayName(),
+                            row.studentUsername(),
+                            row.deviceCode(),
+                            row.deviceName(),
+                            row.quantity(),
+                            row.status(),
+                            resolveUserDisplayName(entity == null ? null : entity.getApprovedBy()),
+                            row.approvedAt(),
+                            resolveUserDisplayName(entity == null ? null : entity.getRejectedBy()),
+                            entity == null ? null : entity.getRejectedAt(),
+                            resolveUserDisplayName(entity == null ? null : entity.getCheckoutBy()),
+                            row.checkoutAt(),
+                            resolveUserDisplayName(entity == null ? null : entity.getReturnBy()),
+                            row.returnAt()
+                    );
+                })
+                .toList();
+
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "筛选条件",
+                        List.of("字段", "值"),
+                        List.of(
+                                row("任务ID", taskId),
+                                row("任务标题", task.getTitle()),
+                                row("导出时间", LocalDateTime.now()),
+                                row("操作者", teacher.username())
+                        )
+                ),
+                new ExcelExportService.SheetSpec(
+                        "进度日志明细",
+                        List.of("任务", "学生姓名", "用户名", "班级", "步骤号", "内容", "附件", "记录时间"),
+                        progressRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "完成登记明细",
+                        List.of("任务", "学生姓名", "用户名", "班级", "完成状态", "完成来源", "申请时间", "确认时间", "确认教师"),
+                        completionRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "设备申请明细",
+                        List.of("任务", "学生姓名", "用户名", "设备编码", "设备名称", "数量", "状态", "备注", "申请时间"),
+                        requestRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "审批流转明细",
+                        List.of("任务", "学生姓名", "用户名", "设备编码", "设备名称", "数量", "当前状态", "审批人", "审批时间", "驳回人", "驳回时间", "借出登记人", "借出时间", "归还登记人", "归还时间"),
+                        flowRows
+                )
+        ));
+    }
+
     public DownloadData downloadProgressAttachment(Long attachmentId, AuthenticatedUser user) {
         TaskProgressAttachmentEntity entity = taskProgressAttachmentMapper.selectById(attachmentId);
         if (entity == null) {
@@ -710,6 +825,14 @@ public class ExperimentFlowService {
 
     private String upper(String value) {
         return value == null ? "" : value.toUpperCase(Locale.ROOT);
+    }
+
+    private List<?> row(Object... values) {
+        List<Object> row = new ArrayList<>();
+        for (Object value : values) {
+            row.add(value);
+        }
+        return row;
     }
 
     private int nvl(Integer value) {

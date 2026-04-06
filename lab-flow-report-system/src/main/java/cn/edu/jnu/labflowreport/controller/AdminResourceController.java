@@ -13,14 +13,11 @@ import cn.edu.jnu.labflowreport.admin.service.AdminResourceService;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import jakarta.validation.Valid;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -76,7 +73,13 @@ public class AdminResourceController {
     @GetMapping("/lab-rooms/export")
     public ResponseEntity<byte[]> exportLabRooms() throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        return csvResponse("lab-rooms.csv", adminResourceService.exportLabRoomsCsv(actor));
+        return ExportResponseHelper.csv("lab-rooms.csv", adminResourceService.exportLabRoomsCsv(actor));
+    }
+
+    @GetMapping("/lab-rooms/export/excel")
+    public ResponseEntity<byte[]> exportLabRoomsExcel() {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("lab-rooms.xlsx", adminResourceService.exportLabRoomsExcel(actor));
     }
 
     @GetMapping("/devices")
@@ -109,7 +112,13 @@ public class AdminResourceController {
     @GetMapping("/devices/export")
     public ResponseEntity<byte[]> exportDevices() throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        return csvResponse("devices.csv", adminResourceService.exportDevicesCsv(actor));
+        return ExportResponseHelper.csv("devices.csv", adminResourceService.exportDevicesCsv(actor));
+    }
+
+    @GetMapping("/devices/export/excel")
+    public ResponseEntity<byte[]> exportDevicesExcel() {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("devices.xlsx", adminResourceService.exportDevicesExcel(actor));
     }
 
     @GetMapping("/semesters")
@@ -139,7 +148,13 @@ public class AdminResourceController {
     @GetMapping("/semesters/export")
     public ResponseEntity<byte[]> exportSemesters() throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        return csvResponse("semesters.csv", adminResourceService.exportSemestersCsv(actor));
+        return ExportResponseHelper.csv("semesters.csv", adminResourceService.exportSemestersCsv(actor));
+    }
+
+    @GetMapping("/semesters/export/excel")
+    public ResponseEntity<byte[]> exportSemestersExcel() {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("semesters.xlsx", adminResourceService.exportSemestersExcel(actor));
     }
 
     @GetMapping("/audit-logs")
@@ -164,20 +179,18 @@ public class AdminResourceController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
     ) throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        return csvResponse("audit-logs.csv", adminResourceService.exportAuditLogsCsv(actor, action, actorUsername, targetType, from, to));
+        return ExportResponseHelper.csv("audit-logs.csv", adminResourceService.exportAuditLogsCsv(actor, action, actorUsername, targetType, from, to));
     }
 
-    private ResponseEntity<byte[]> csvResponse(String filename, String csv) throws Exception {
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .body(out.toByteArray());
+    @GetMapping("/audit-logs/export/excel")
+    public ResponseEntity<byte[]> exportAuditLogsExcel(
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String actorUsername,
+            @RequestParam(required = false) String targetType,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
+    ) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("audit-logs.xlsx", adminResourceService.exportAuditLogsExcel(actor, action, actorUsername, targetType, from, to));
     }
 }
-

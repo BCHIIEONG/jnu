@@ -11,6 +11,7 @@ import cn.edu.jnu.labflowreport.admin.service.AdminUserService;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import jakarta.validation.Valid;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -96,20 +97,12 @@ public class AdminUserController {
     @GetMapping("/users/export")
     public ResponseEntity<byte[]> exportUsers() throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        String csv = adminUserService.exportUsersCsv(actor);
-        return csvResponse("users.csv", csv);
+        return ExportResponseHelper.csv("users.csv", adminUserService.exportUsersCsv(actor));
     }
 
-    private ResponseEntity<byte[]> csvResponse(String filename, String csv) throws Exception {
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .body(out.toByteArray());
+    @GetMapping("/users/export/excel")
+    public ResponseEntity<byte[]> exportUsersExcel() {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("users.xlsx", adminUserService.exportUsersExcel(actor));
     }
 }

@@ -4,11 +4,16 @@ import cn.edu.jnu.labflowreport.admin.service.AdminAuditActions;
 import cn.edu.jnu.labflowreport.admin.service.AdminAuditService;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.ExportRecordEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.SemesterEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExportRecordMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.SemesterMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.SysUserMapper;
 import cn.edu.jnu.labflowreport.statistics.vo.AdminStatisticsDashboardVO;
 import cn.edu.jnu.labflowreport.statistics.vo.StatisticsChartVO;
 import cn.edu.jnu.labflowreport.statistics.vo.StatisticsOptionVO;
@@ -45,19 +50,28 @@ public class StatisticsService {
     private final ExportRecordMapper exportRecordMapper;
     private final ObjectMapper objectMapper;
     private final AdminAuditService adminAuditService;
+    private final SysUserMapper sysUserMapper;
+    private final OrgClassMapper orgClassMapper;
+    private final ExcelExportService excelExportService;
 
     public StatisticsService(
             NamedParameterJdbcTemplate jdbcTemplate,
             SemesterMapper semesterMapper,
             ExportRecordMapper exportRecordMapper,
             ObjectMapper objectMapper,
-            AdminAuditService adminAuditService
+            AdminAuditService adminAuditService,
+            SysUserMapper sysUserMapper,
+            OrgClassMapper orgClassMapper,
+            ExcelExportService excelExportService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.semesterMapper = semesterMapper;
         this.exportRecordMapper = exportRecordMapper;
         this.objectMapper = objectMapper;
         this.adminAuditService = adminAuditService;
+        this.sysUserMapper = sysUserMapper;
+        this.orgClassMapper = orgClassMapper;
+        this.excelExportService = excelExportService;
     }
 
     public TeacherStatisticsDashboardVO getTeacherDashboard(
@@ -352,6 +366,170 @@ public class StatisticsService {
                     .append(cell(row.attendanceSessionCount())).append("\n");
         }
         return csv.toString();
+    }
+
+    public byte[] exportTeacherTaskStatsExcel(AuthenticatedUser teacher, Long semesterId, LocalDate from, LocalDate to) {
+        TeacherStatisticsDashboardVO dashboard = getTeacherDashboard(teacher, semesterId, from, to);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<TaskMetaRow> tasks = loadTasks(teacher.userId(), null, filters, false);
+        List<Map<String, Object>> submissionDetails = loadTaskSubmissionDetails(teacher.userId(), null, filters);
+        List<Map<String, Object>> reviewDetails = loadTaskReviewDetails(teacher.userId(), null, filters);
+        List<Map<String, Object>> completionDetails = loadTaskCompletionDetails(teacher.userId(), null, filters);
+        var unsubmittedRows = buildUnsubmittedRows(tasks, submissionDetails);
+        recordTeacherExport(teacher, "TEACHER_TASK_STATS_EXCEL", Map.of(
+                "semesterId", dashboard.filters().semesterId(),
+                "from", String.valueOf(dashboard.filters().from()),
+                "to", String.valueOf(dashboard.filters().to())
+        ));
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildTeacherFilterRows(dashboard.filters(), teacher)),
+                new ExcelExportService.SheetSpec(
+                        "汇总",
+                        List.of("任务ID", "任务标题", "提交数", "批阅数", "平均分", "已确认完成"),
+                        dashboard.tables().taskTable().stream()
+                                .map(item -> row(item.taskId(), item.taskTitle(), item.submissionCount(), item.reviewedSubmissionCount(), item.avgScore(), item.confirmedCompletionCount()))
+                                .toList()
+                ),
+                new ExcelExportService.SheetSpec("提交明细", List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "版本号", "提交状态", "提交时间"),
+                        toRows(submissionDetails, "task_id", "task_title", "student_id", "student_display_name", "student_username", "class_display_name", "version_no", "submit_status", "submitted_at")),
+                new ExcelExportService.SheetSpec("未提交名单", List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "任务可见"),
+                        unsubmittedRows),
+                new ExcelExportService.SheetSpec("批阅明细", List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "版本号", "分数", "批语", "批阅时间"),
+                        toRows(reviewDetails, "task_id", "task_title", "student_id", "student_display_name", "student_username", "class_display_name", "version_no", "score", "comment", "reviewed_at")),
+                new ExcelExportService.SheetSpec("完成登记明细", List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "完成状态", "完成来源", "申请时间", "确认时间", "确认教师"),
+                        toRows(completionDetails, "task_id", "task_title", "student_id", "student_display_name", "student_username", "class_display_name", "status", "completion_source", "requested_at", "confirmed_at", "confirmed_by_display_name"))
+        ));
+    }
+
+    public byte[] exportTeacherExperimentCourseStatsExcel(AuthenticatedUser teacher, Long semesterId, LocalDate from, LocalDate to) {
+        TeacherStatisticsDashboardVO dashboard = getTeacherDashboard(teacher, semesterId, from, to);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<Map<String, Object>> enrollmentDetails = loadCourseEnrollmentDetails(teacher.userId(), null, filters);
+        List<Map<String, Object>> instanceDetails = loadCourseInstanceDetails(teacher.userId(), null, filters);
+        List<Map<String, Object>> attendanceDetails = loadCourseAttendanceDetails(teacher.userId(), null, filters);
+        recordTeacherExport(teacher, "TEACHER_EXPERIMENT_COURSE_STATS_EXCEL", Map.of(
+                "semesterId", dashboard.filters().semesterId(),
+                "from", String.valueOf(dashboard.filters().from()),
+                "to", String.valueOf(dashboard.filters().to())
+        ));
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildTeacherFilterRows(dashboard.filters(), teacher)),
+                new ExcelExportService.SheetSpec(
+                        "汇总",
+                        List.of("课程ID", "课程名称", "场次数", "有效报名人数", "签到场次数"),
+                        dashboard.tables().experimentCourseTable().stream()
+                                .map(item -> row(item.courseId(), item.courseTitle(), item.slotCount(), item.activeEnrollmentCount(), item.attendanceSessionCount()))
+                                .toList()
+                ),
+                new ExcelExportService.SheetSpec("课程报名明细",
+                        List.of("课程ID", "课程名称", "场次ID", "场次名称", "学生ID", "学生姓名", "用户名", "班级", "报名方式", "报名时间", "状态"),
+                        toRows(enrollmentDetails, "course_id", "course_title", "slot_id", "slot_name", "student_id", "student_display_name", "student_username", "class_display_name", "join_source", "selected_at", "status")),
+                new ExcelExportService.SheetSpec("课程课次明细",
+                        List.of("课程ID", "课程名称", "场次ID", "场次名称", "课次ID", "课次名称", "周几", "上课日期", "节次", "实验室", "容量"),
+                        instanceRowsWithWeekday(instanceDetails)),
+                new ExcelExportService.SheetSpec("课程签到明细",
+                        List.of("课程ID", "课程名称", "场次ID", "场次名称", "课次ID", "课次名称", "周几", "上课日期", "节次", "实验室", "学生姓名", "用户名", "班级", "签到状态", "签到方式", "签到时间"),
+                        attendanceRowsWithWeekday(attendanceDetails))
+        ));
+    }
+
+    public byte[] exportTeacherDeviceRequestStatsExcel(AuthenticatedUser teacher, Long semesterId, LocalDate from, LocalDate to) {
+        TeacherStatisticsDashboardVO dashboard = getTeacherDashboard(teacher, semesterId, from, to);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<Map<String, Object>> requestDetails = loadDeviceRequestDetails(teacher.userId(), null, filters);
+        recordTeacherExport(teacher, "TEACHER_DEVICE_REQUEST_STATS_EXCEL", Map.of(
+                "semesterId", dashboard.filters().semesterId(),
+                "from", String.valueOf(dashboard.filters().from()),
+                "to", String.valueOf(dashboard.filters().to())
+        ));
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildTeacherFilterRows(dashboard.filters(), teacher)),
+                new ExcelExportService.SheetSpec(
+                        "汇总",
+                        List.of("任务ID", "任务标题", "待审批", "已批准", "借出中", "已归还"),
+                        dashboard.tables().deviceRequestTable().stream()
+                                .map(item -> row(item.taskId(), item.taskTitle(), item.pendingCount(), item.approvedCount(), item.borrowedCount(), item.returnedCount()))
+                                .toList()
+                ),
+                new ExcelExportService.SheetSpec("申请明细",
+                        List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "设备编码", "设备名称", "数量", "申请时间", "当前状态", "备注"),
+                        toRows(requestDetails, "task_id", "task_title", "student_id", "student_display_name", "student_username", "class_display_name", "device_code", "device_name", "quantity", "created_at", "status", "note")),
+                new ExcelExportService.SheetSpec("审批流转明细",
+                        List.of("任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "设备编码", "设备名称", "当前状态", "批准人", "批准时间", "驳回人", "驳回时间", "借出登记人", "借出时间", "归还登记人", "归还时间"),
+                        toRows(requestDetails, "task_id", "task_title", "student_id", "student_display_name", "student_username", "device_code", "device_name", "status", "approved_by_name", "approved_at", "rejected_by_name", "rejected_at", "checkout_by_name", "checkout_at", "return_by_name", "return_at"))
+        ));
+    }
+
+    public byte[] exportAdminTeacherStatsExcel(AuthenticatedUser admin, Long semesterId, LocalDate from, LocalDate to, Long teacherId, Long classId) {
+        AdminStatisticsDashboardVO dashboard = getAdminDashboard(admin, semesterId, from, to, teacherId, classId);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<Map<String, Object>> taskDetails = loadAdminTaskDetails(teacherId, classId, filters);
+        List<Map<String, Object>> submissionDetails = loadTaskSubmissionDetails(teacherId, classId, filters);
+        List<Map<String, Object>> attendanceDetails = loadAdminAttendanceDetails(teacherId, classId, filters);
+        List<Map<String, Object>> courseDetails = loadAdminCourseDetails(teacherId, classId, filters);
+        recordAdminStatisticsExport(admin, "teachers_excel", dashboard.filters());
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildAdminFilterRows(dashboard.filters(), admin)),
+                new ExcelExportService.SheetSpec("汇总", List.of("教师ID", "教师姓名", "任务数", "提交数", "批阅数", "签到场次", "平均到课率"),
+                        dashboard.tables().teacherTable().stream()
+                                .map(item -> row(item.teacherId(), item.teacherName(), item.taskCount(), item.submissionCount(), item.reviewedSubmissionCount(), item.attendanceSessionCount(), item.avgAttendanceRate()))
+                                .toList()),
+                new ExcelExportService.SheetSpec("教师任务明细", List.of("教师ID", "教师姓名", "任务ID", "任务标题", "任务状态", "创建时间"),
+                        toRows(taskDetails, "teacher_id", "teacher_name", "task_id", "task_title", "task_status", "created_at")),
+                new ExcelExportService.SheetSpec("教师提交明细", List.of("教师ID", "教师姓名", "任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "班级", "版本号", "提交时间"),
+                        toRows(submissionDetails, "teacher_id", "teacher_name", "task_id", "task_title", "student_id", "student_display_name", "student_username", "class_display_name", "version_no", "submitted_at")),
+                new ExcelExportService.SheetSpec("教师签到明细", List.of("教师ID", "教师姓名", "课程", "日期", "实验室", "签到场次", "已到人数", "应到人数", "到课率"),
+                        toRows(attendanceDetails, "teacher_id", "teacher_name", "course_name", "lesson_date", "lab_room_name", "session_id", "checked_in_count", "total_count", "attendance_rate")),
+                new ExcelExportService.SheetSpec("教师实验课程明细", List.of("教师ID", "教师姓名", "课程ID", "课程名称", "场次数", "有效报名数", "签到场次数"),
+                        toRows(courseDetails, "teacher_id", "teacher_name", "course_id", "course_title", "slot_count", "active_enrollment_count", "attendance_session_count"))
+        ));
+    }
+
+    public byte[] exportAdminClassStatsExcel(AuthenticatedUser admin, Long semesterId, LocalDate from, LocalDate to, Long teacherId, Long classId) {
+        AdminStatisticsDashboardVO dashboard = getAdminDashboard(admin, semesterId, from, to, teacherId, classId);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<Map<String, Object>> studentDetails = loadAdminStudentDetails(teacherId, classId, filters);
+        List<Map<String, Object>> submissionDetails = loadTaskSubmissionDetails(teacherId, classId, filters);
+        List<Map<String, Object>> attendanceDetails = loadAdminAttendanceDetails(teacherId, classId, filters);
+        List<Map<String, Object>> enrollmentDetails = loadCourseEnrollmentDetails(teacherId, classId, filters);
+        recordAdminStatisticsExport(admin, "classes_excel", dashboard.filters());
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildAdminFilterRows(dashboard.filters(), admin)),
+                new ExcelExportService.SheetSpec("汇总", List.of("班级ID", "班级名称", "学生数", "提交数", "签到场次", "平均到课率"),
+                        dashboard.tables().classTable().stream()
+                                .map(item -> row(item.classId(), item.className(), item.studentCount(), item.submissionCount(), item.attendanceSessionCount(), item.avgAttendanceRate()))
+                                .toList()),
+                new ExcelExportService.SheetSpec("班级学生名单", List.of("班级ID", "班级名称", "学生ID", "学生姓名", "用户名"),
+                        toRows(studentDetails, "class_id", "class_display_name", "student_id", "student_display_name", "student_username")),
+                new ExcelExportService.SheetSpec("班级提交明细", List.of("班级ID", "班级名称", "任务ID", "任务标题", "学生ID", "学生姓名", "用户名", "版本号", "提交时间"),
+                        toRows(submissionDetails, "class_id", "class_display_name", "task_id", "task_title", "student_id", "student_display_name", "student_username", "version_no", "submitted_at")),
+                new ExcelExportService.SheetSpec("班级签到明细", List.of("班级ID", "班级名称", "课程", "日期", "实验室", "签到场次", "已到人数", "应到人数", "到课率"),
+                        toRows(attendanceDetails, "class_id", "class_display_name", "course_name", "lesson_date", "lab_room_name", "session_id", "checked_in_count", "total_count", "attendance_rate")),
+                new ExcelExportService.SheetSpec("班级实验课程报名明细", List.of("班级ID", "班级名称", "课程ID", "课程名称", "场次名称", "学生ID", "学生姓名", "用户名", "报名方式", "报名时间", "状态"),
+                        toRows(enrollmentDetails, "class_id", "class_display_name", "course_id", "course_title", "slot_name", "student_id", "student_display_name", "student_username", "join_source", "selected_at", "status"))
+        ));
+    }
+
+    public byte[] exportAdminExperimentCourseStatsExcel(AuthenticatedUser admin, Long semesterId, LocalDate from, LocalDate to, Long teacherId, Long classId) {
+        AdminStatisticsDashboardVO dashboard = getAdminDashboard(admin, semesterId, from, to, teacherId, classId);
+        ResolvedFilters filters = resolveFilters(semesterId, from, to);
+        List<Map<String, Object>> instanceDetails = loadCourseInstanceDetails(teacherId, classId, filters);
+        List<Map<String, Object>> enrollmentDetails = loadCourseEnrollmentDetails(teacherId, classId, filters);
+        List<Map<String, Object>> attendanceDetails = loadCourseAttendanceDetails(teacherId, classId, filters);
+        recordAdminStatisticsExport(admin, "experiment_courses_excel", dashboard.filters());
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), buildAdminFilterRows(dashboard.filters(), admin)),
+                new ExcelExportService.SheetSpec("汇总", List.of("课程ID", "课程名称", "教师ID", "教师姓名", "有效报名数", "场次数", "签到场次数"),
+                        dashboard.tables().experimentCourseTable().stream()
+                                .map(item -> row(item.courseId(), item.courseTitle(), item.teacherId(), item.teacherName(), item.activeEnrollmentCount(), item.slotCount(), item.attendanceSessionCount()))
+                                .toList()),
+                new ExcelExportService.SheetSpec("课程课次明细", List.of("课程ID", "课程名称", "教师ID", "教师姓名", "场次ID", "场次名称", "课次ID", "课次名称", "周几", "上课日期", "节次", "实验室", "容量"),
+                        adminInstanceRowsWithWeekday(instanceDetails)),
+                new ExcelExportService.SheetSpec("课程报名明细", List.of("课程ID", "课程名称", "教师ID", "教师姓名", "场次ID", "场次名称", "学生ID", "学生姓名", "用户名", "班级", "报名方式", "报名时间", "状态"),
+                        toRows(enrollmentDetails, "course_id", "course_title", "teacher_id", "teacher_name", "slot_id", "slot_name", "student_id", "student_display_name", "student_username", "class_display_name", "join_source", "selected_at", "status")),
+                new ExcelExportService.SheetSpec("课程签到明细", List.of("课程ID", "课程名称", "教师ID", "教师姓名", "场次ID", "场次名称", "课次ID", "课次名称", "周几", "上课日期", "节次", "实验室", "学生姓名", "用户名", "班级", "签到状态", "签到方式", "签到时间"),
+                        adminAttendanceRowsWithWeekday(attendanceDetails))
+        ));
     }
 
     private ResolvedFilters resolveFilters(Long semesterId, LocalDate from, LocalDate to) {
@@ -1177,6 +1355,731 @@ public class StatisticsService {
                 .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX))), Long.class);
     }
 
+    private List<List<?>> buildTeacherFilterRows(TeacherStatisticsDashboardVO.Filters filters, AuthenticatedUser actor) {
+        List<List<?>> rows = new ArrayList<>();
+        rows.add(row("学期ID", filters.semesterId()));
+        rows.add(row("学期名称", filters.semesterName()));
+        rows.add(row("开始日期", filters.from()));
+        rows.add(row("结束日期", filters.to()));
+        rows.add(row("导出时间", LocalDateTime.now()));
+        rows.add(row("操作者", actor.username()));
+        return rows;
+    }
+
+    private List<List<?>> buildAdminFilterRows(AdminStatisticsDashboardVO.Filters filters, AuthenticatedUser actor) {
+        List<List<?>> rows = new ArrayList<>();
+        rows.add(row("学期ID", filters.semesterId()));
+        rows.add(row("学期名称", filters.semesterName()));
+        rows.add(row("开始日期", filters.from()));
+        rows.add(row("结束日期", filters.to()));
+        rows.add(row("教师ID", filters.teacherId()));
+        rows.add(row("班级ID", filters.classId()));
+        rows.add(row("导出时间", LocalDateTime.now()));
+        rows.add(row("操作者", actor.username()));
+        return rows;
+    }
+
+    private List<?> row(Object... values) {
+        List<Object> row = new ArrayList<>();
+        for (Object value : values) {
+            row.add(value);
+        }
+        return row;
+    }
+
+    private List<List<?>> toRows(List<Map<String, Object>> maps, String... keys) {
+        List<List<?>> rows = new ArrayList<>();
+        for (Map<String, Object> map : maps) {
+            List<Object> row = new ArrayList<>();
+            for (String key : keys) {
+                row.add(map.get(key));
+            }
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private List<List<?>> instanceRowsWithWeekday(List<Map<String, Object>> maps) {
+        List<List<?>> rows = new ArrayList<>();
+        for (Map<String, Object> map : maps) {
+            rows.add(row(
+                    map.get("course_id"),
+                    map.get("course_title"),
+                    map.get("slot_id"),
+                    map.get("slot_name"),
+                    map.get("instance_id"),
+                    map.get("instance_name"),
+                    weekdayLabel(date(map.get("lesson_date"))),
+                    map.get("lesson_date"),
+                    map.get("time_slot_name"),
+                    map.get("lab_room_name"),
+                    map.get("capacity")
+            ));
+        }
+        return rows;
+    }
+
+    private List<List<?>> adminInstanceRowsWithWeekday(List<Map<String, Object>> maps) {
+        List<List<?>> rows = new ArrayList<>();
+        for (Map<String, Object> map : maps) {
+            rows.add(row(
+                    map.get("course_id"),
+                    map.get("course_title"),
+                    map.get("teacher_id"),
+                    map.get("teacher_name"),
+                    map.get("slot_id"),
+                    map.get("slot_name"),
+                    map.get("instance_id"),
+                    map.get("instance_name"),
+                    weekdayLabel(date(map.get("lesson_date"))),
+                    map.get("lesson_date"),
+                    map.get("time_slot_name"),
+                    map.get("lab_room_name"),
+                    map.get("capacity")
+            ));
+        }
+        return rows;
+    }
+
+    private List<List<?>> attendanceRowsWithWeekday(List<Map<String, Object>> maps) {
+        List<List<?>> rows = new ArrayList<>();
+        for (Map<String, Object> map : maps) {
+            rows.add(row(
+                    map.get("course_id"),
+                    map.get("course_title"),
+                    map.get("slot_id"),
+                    map.get("slot_name"),
+                    map.get("instance_id"),
+                    map.get("instance_name"),
+                    weekdayLabel(date(map.get("lesson_date"))),
+                    map.get("lesson_date"),
+                    map.get("time_slot_name"),
+                    map.get("lab_room_name"),
+                    map.get("student_display_name"),
+                    map.get("student_username"),
+                    map.get("class_display_name"),
+                    map.get("attendance_status"),
+                    map.get("attendance_method"),
+                    map.get("checked_in_at")
+            ));
+        }
+        return rows;
+    }
+
+    private List<List<?>> adminAttendanceRowsWithWeekday(List<Map<String, Object>> maps) {
+        List<List<?>> rows = new ArrayList<>();
+        for (Map<String, Object> map : maps) {
+            rows.add(row(
+                    map.get("course_id"),
+                    map.get("course_title"),
+                    map.get("teacher_id"),
+                    map.get("teacher_name"),
+                    map.get("slot_id"),
+                    map.get("slot_name"),
+                    map.get("instance_id"),
+                    map.get("instance_name"),
+                    weekdayLabel(date(map.get("lesson_date"))),
+                    map.get("lesson_date"),
+                    map.get("time_slot_name"),
+                    map.get("lab_room_name"),
+                    map.get("student_display_name"),
+                    map.get("student_username"),
+                    map.get("class_display_name"),
+                    map.get("attendance_status"),
+                    map.get("attendance_method"),
+                    map.get("checked_in_at")
+            ));
+        }
+        return rows;
+    }
+
+    private List<List<?>> buildUnsubmittedRows(List<TaskMetaRow> tasks, List<Map<String, Object>> submissionDetails) {
+        Map<Long, Set<Long>> submittedStudentIds = submissionDetails.stream()
+                .collect(Collectors.groupingBy(
+                        map -> longVal(map.get("task_id")),
+                        Collectors.mapping(map -> longVal(map.get("student_id")), Collectors.toSet())
+                ));
+        List<List<?>> rows = new ArrayList<>();
+        for (TaskMetaRow task : tasks) {
+            List<cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity> students = sysUserMapper.findStudentsForTask(task.id());
+            Set<Long> submitted = submittedStudentIds.getOrDefault(task.id(), Set.of());
+            Map<Long, String> classDisplayMap = loadClassDisplayMap(students);
+            for (cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity student : students) {
+                if (submitted.contains(student.getId())) {
+                    continue;
+                }
+                rows.add(row(
+                        task.id(),
+                        task.title(),
+                        student.getId(),
+                        str(student.getDisplayName()),
+                        student.getUsername(),
+                        classDisplayMap.get(student.getId()),
+                        "是"
+                ));
+            }
+        }
+        return rows;
+    }
+
+    private Map<Long, String> loadClassDisplayMap(List<cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity> students) {
+        Set<Long> classIds = students.stream()
+                .map(cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity::getClassId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (classIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, OrgClassEntity> classMap = orgClassMapper.selectBatchIds(classIds).stream()
+                .collect(Collectors.toMap(OrgClassEntity::getId, item -> item));
+        Map<Long, String> result = new LinkedHashMap<>();
+        for (cn.edu.jnu.labflowreport.persistence.entity.SysUserEntity student : students) {
+            if (student.getId() == null) {
+                continue;
+            }
+            OrgClassEntity clazz = classMap.get(student.getClassId());
+            result.put(student.getId(),
+                    clazz == null ? null : ClassDisplayUtils.effectiveDisplayName(clazz.getGrade(), clazz.getName()));
+        }
+        return result;
+    }
+
+    private String weekdayLabel(LocalDate lessonDate) {
+        if (lessonDate == null) {
+            return null;
+        }
+        return switch (lessonDate.getDayOfWeek()) {
+            case MONDAY -> "周一";
+            case TUESDAY -> "周二";
+            case WEDNESDAY -> "周三";
+            case THURSDAY -> "周四";
+            case FRIDAY -> "周五";
+            case SATURDAY -> "周六";
+            case SUNDAY -> "周日";
+        };
+    }
+
+    private List<Map<String, Object>> loadTaskSubmissionDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.publisher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       t.id AS task_id,
+                       t.title AS task_title,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       rs.version_no,
+                       rs.submit_status,
+                       rs.submitted_at
+                FROM report_submission rs
+                JOIN exp_task t ON t.id = rs.task_id
+                JOIN sys_user teacher ON teacher.id = t.publisher_id
+                JOIN sys_user su ON su.id = rs.student_id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE rs.submitted_at BETWEEN :fromTime AND :toTime
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND t.publisher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY t.id DESC, su.username ASC, rs.version_no DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadTaskReviewDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.publisher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       t.id AS task_id,
+                       t.title AS task_title,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       rs.version_no,
+                       rr.score,
+                       rr.comment,
+                       rr.reviewed_at
+                FROM report_review rr
+                JOIN report_submission rs ON rs.id = rr.submission_id
+                JOIN exp_task t ON t.id = rs.task_id
+                JOIN sys_user teacher ON teacher.id = t.publisher_id
+                JOIN sys_user su ON su.id = rs.student_id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE rr.reviewed_at BETWEEN :fromTime AND :toTime
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND t.publisher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY t.id DESC, su.username ASC, rr.reviewed_at DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadTaskCompletionDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.publisher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       t.id AS task_id,
+                       t.title AS task_title,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       tc.status,
+                       tc.completion_source,
+                       tc.requested_at,
+                       tc.confirmed_at,
+                       COALESCE(NULLIF(TRIM(confirmer.display_name), ''), confirmer.username) AS confirmed_by_display_name
+                FROM task_completion tc
+                JOIN exp_task t ON t.id = tc.task_id
+                JOIN sys_user teacher ON teacher.id = t.publisher_id
+                JOIN sys_user su ON su.id = tc.student_id
+                LEFT JOIN sys_user confirmer ON confirmer.id = tc.confirmed_by
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE ((tc.requested_at BETWEEN :fromTime AND :toTime) OR (tc.confirmed_at BETWEEN :fromTime AND :toTime))
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND t.publisher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY t.id DESC, su.username ASC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadCourseEnrollmentDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT ec.id AS course_id,
+                       ec.title AS course_title,
+                       ec.teacher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       ecs.id AS slot_id,
+                       COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       e.join_source,
+                       e.selected_at,
+                       e.status
+                FROM experiment_course_enrollment e
+                JOIN experiment_course ec ON ec.id = e.course_id
+                JOIN sys_user teacher ON teacher.id = ec.teacher_id
+                JOIN experiment_course_slot ecs ON ecs.id = e.slot_id
+                JOIN sys_user su ON su.id = e.student_id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE ec.semester_id = :semesterId
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("semesterId", filters.semester().getId());
+        if (teacherId != null) {
+            sql.append(" AND ec.teacher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY ec.id DESC, ecs.id ASC, e.selected_at ASC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadCourseInstanceDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT ec.id AS course_id,
+                       ec.title AS course_title,
+                       ec.teacher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       ecs.id AS slot_id,
+                       COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,
+                       ecsi.id AS instance_id,
+                       ecsi.display_name AS instance_name,
+                       ecsi.lesson_date,
+                       ts.name AS time_slot_name,
+                       lr.name AS lab_room_name,
+                       ecsi.capacity
+                FROM experiment_course_slot_instance ecsi
+                JOIN experiment_course ec ON ec.id = ecsi.course_id
+                JOIN sys_user teacher ON teacher.id = ec.teacher_id
+                JOIN experiment_course_slot ecs ON ecs.id = ecsi.slot_group_id
+                LEFT JOIN time_slot ts ON ts.id = ecsi.slot_id
+                LEFT JOIN lab_room lr ON lr.id = ecsi.lab_room_id
+                WHERE ec.semester_id = :semesterId
+                  AND ecsi.lesson_date BETWEEN :fromDate AND :toDate
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("semesterId", filters.semester().getId())
+                .addValue("fromDate", Date.valueOf(filters.from()))
+                .addValue("toDate", Date.valueOf(filters.to()));
+        if (teacherId != null) {
+            sql.append(" AND ec.teacher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append("""
+                     AND EXISTS (
+                        SELECT 1
+                        FROM experiment_course_enrollment e
+                        JOIN sys_user su ON su.id = e.student_id
+                        WHERE e.slot_id = ecs.id
+                          AND e.status = 'ENROLLED'
+                          AND su.class_id = :classId
+                     )
+                    """);
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY ec.id DESC, ecsi.lesson_date ASC, ecsi.id ASC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadCourseAttendanceDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT ec.id AS course_id,
+                       ec.title AS course_title,
+                       ec.teacher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       ecs.id AS slot_id,
+                       COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,
+                       ecsi.id AS instance_id,
+                       ecsi.display_name AS instance_name,
+                       ecsi.lesson_date,
+                       ts.name AS time_slot_name,
+                       lr.name AS lab_room_name,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       COALESCE(ar.status, 'NOT_CHECKED_IN') AS attendance_status,
+                       ar.method AS attendance_method,
+                       ar.checked_in_at
+                FROM attendance_session ats
+                JOIN experiment_course ec ON ec.id = ats.experiment_course_id
+                JOIN sys_user teacher ON teacher.id = ec.teacher_id
+                JOIN experiment_course_slot ecs ON ecs.id = ats.experiment_course_slot_id
+                JOIN experiment_course_slot_instance ecsi ON ecsi.id = ats.experiment_course_instance_id
+                JOIN experiment_course_enrollment e ON e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
+                JOIN sys_user su ON su.id = e.student_id
+                LEFT JOIN attendance_record ar ON ar.session_id = ats.id AND ar.student_id = su.id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                LEFT JOIN time_slot ts ON ts.id = ecsi.slot_id
+                LEFT JOIN lab_room lr ON lr.id = ecsi.lab_room_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                  AND ec.semester_id = :semesterId
+                  AND ats.started_at BETWEEN :fromTime AND :toTime
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("semesterId", filters.semester().getId())
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND ec.teacher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY ec.id DESC, ecsi.lesson_date ASC, su.username ASC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadDeviceRequestDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.publisher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       t.id AS task_id,
+                       t.title AS task_title,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       td.code AS device_code,
+                       td.name AS device_name,
+                       dr.quantity,
+                       dr.status,
+                       dr.note,
+                       dr.created_at,
+                       COALESCE(NULLIF(TRIM(approver.display_name), ''), approver.username) AS approved_by_name,
+                       dr.approved_at,
+                       COALESCE(NULLIF(TRIM(rejector.display_name), ''), rejector.username) AS rejected_by_name,
+                       dr.rejected_at,
+                       COALESCE(NULLIF(TRIM(checkouter.display_name), ''), checkouter.username) AS checkout_by_name,
+                       dr.checkout_at,
+                       COALESCE(NULLIF(TRIM(returner.display_name), ''), returner.username) AS return_by_name,
+                       dr.return_at
+                FROM task_device_request dr
+                JOIN exp_task t ON t.id = dr.task_id
+                JOIN sys_user teacher ON teacher.id = t.publisher_id
+                JOIN sys_user su ON su.id = dr.student_id
+                JOIN thing_device td ON td.id = dr.device_id
+                LEFT JOIN sys_user approver ON approver.id = dr.approved_by
+                LEFT JOIN sys_user rejector ON rejector.id = dr.rejected_by
+                LEFT JOIN sys_user checkouter ON checkouter.id = dr.checkout_by
+                LEFT JOIN sys_user returner ON returner.id = dr.return_by
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE dr.created_at BETWEEN :fromTime AND :toTime
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND t.publisher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY t.id DESC, dr.created_at DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadAdminTaskDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT t.publisher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       t.id AS task_id,
+                       t.title AS task_title,
+                       t.status AS task_status,
+                       t.created_at
+                FROM exp_task t
+                JOIN sys_user teacher ON teacher.id = t.publisher_id
+                LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
+                WHERE ((t.experiment_course_id IS NOT NULL AND ec.semester_id = :semesterId)
+                    OR (t.experiment_course_id IS NULL AND CAST(t.created_at AS DATE) BETWEEN :fromDate AND :toDate))
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("semesterId", filters.semester().getId())
+                .addValue("fromDate", Date.valueOf(filters.from()))
+                .addValue("toDate", Date.valueOf(filters.to()));
+        if (teacherId != null) {
+            sql.append(" AND t.publisher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append("""
+                     AND (
+                        EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id AND tc.class_id = :classId)
+                        OR EXISTS (
+                           SELECT 1 FROM report_submission rs
+                           JOIN sys_user su ON su.id = rs.student_id
+                           WHERE rs.task_id = t.id AND su.class_id = :classId
+                        )
+                        OR EXISTS (
+                           SELECT 1 FROM experiment_course_enrollment e
+                           JOIN sys_user su ON su.id = e.student_id
+                           WHERE e.course_id = t.experiment_course_id
+                             AND e.status = 'ENROLLED'
+                             AND su.class_id = :classId
+                        )
+                     )
+                    """);
+            params.addValue("classId", classId);
+        }
+        sql.append(" ORDER BY t.created_at DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadAdminAttendanceDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT s.teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ec.title ELSE cs.course_name END AS course_name,
+                       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.lesson_date ELSE cs.lesson_date END AS lesson_date,
+                       COALESCE(exp_room.name, class_room.name) AS lab_room_name,
+                       s.id AS session_id,
+                       COUNT(DISTINCT ar.student_id) AS checked_in_count,
+                       COUNT(DISTINCT roster.student_id) AS total_count,
+                       CASE
+                         WHEN COUNT(DISTINCT roster.student_id) = 0 THEN 0
+                         ELSE COUNT(DISTINCT ar.student_id) * 1.0 / COUNT(DISTINCT roster.student_id)
+                       END AS attendance_rate
+                FROM attendance_session s
+                JOIN sys_user teacher ON teacher.id = s.teacher_id
+                LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'
+                LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id
+                LEFT JOIN experiment_course ec ON ec.id = s.experiment_course_id AND s.source_type = 'EXPERIMENT_COURSE'
+                LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'
+                LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id
+                LEFT JOIN (
+                    SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                    FROM attendance_session ats
+                    JOIN sys_user su ON ats.source_type = 'CLASS_SCHEDULE' AND su.class_id = ats.class_id
+                    JOIN sys_user_role ur ON ur.user_id = su.id
+                    JOIN sys_role sr ON sr.id = ur.role_id AND sr.code = 'ROLE_STUDENT'
+                    WHERE su.enabled = TRUE
+                    UNION ALL
+                    SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                    FROM attendance_session ats
+                    JOIN experiment_course_enrollment e ON ats.source_type = 'EXPERIMENT_COURSE'
+                        AND e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
+                    JOIN sys_user su ON su.id = e.student_id
+                ) roster ON roster.session_id = s.id
+                LEFT JOIN sys_user su ON su.id = roster.student_id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                LEFT JOIN attendance_record ar ON ar.session_id = s.id AND ar.student_id = roster.student_id
+                WHERE s.started_at BETWEEN :fromTime AND :toTime
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
+                .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        if (teacherId != null) {
+            sql.append(" AND s.teacher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" GROUP BY s.teacher_id, teacher_name, su.class_id, class_display_name, course_name, lesson_date, lab_room_name, s.id ORDER BY lesson_date DESC, s.id DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadAdminCourseDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT ec.teacher_id AS teacher_id,
+                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
+                       ec.id AS course_id,
+                       ec.title AS course_title,
+                       COUNT(DISTINCT ecs.id) AS slot_count,
+                       COUNT(DISTINCT CASE WHEN e.status = 'ENROLLED' THEN e.id END) AS active_enrollment_count,
+                       COUNT(DISTINCT ats.id) AS attendance_session_count
+                FROM experiment_course ec
+                JOIN sys_user teacher ON teacher.id = ec.teacher_id
+                LEFT JOIN experiment_course_slot ecs ON ecs.course_id = ec.id
+                LEFT JOIN experiment_course_enrollment e ON e.course_id = ec.id
+                LEFT JOIN sys_user su ON su.id = e.student_id
+                LEFT JOIN attendance_session ats ON ats.experiment_course_id = ec.id
+                WHERE ec.semester_id = :semesterId
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("semesterId", filters.semester().getId());
+        if (teacherId != null) {
+            sql.append(" AND ec.teacher_id = :teacherId");
+            params.addValue("teacherId", teacherId);
+        }
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        }
+        sql.append(" GROUP BY ec.teacher_id, teacher_name, ec.id, ec.title ORDER BY ec.id DESC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
+
+    private List<Map<String, Object>> loadAdminStudentDetails(Long teacherId, Long classId, ResolvedFilters filters) {
+        StringBuilder sql = new StringBuilder("""
+                SELECT su.class_id AS class_id,
+                       CASE
+                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
+                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
+                         ELSE c.name
+                       END AS class_display_name,
+                       su.id AS student_id,
+                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
+                       su.username AS student_username
+                FROM sys_user su
+                JOIN sys_user_role ur ON ur.user_id = su.id
+                JOIN sys_role sr ON sr.id = ur.role_id
+                LEFT JOIN org_class c ON c.id = su.class_id
+                LEFT JOIN org_department d ON d.id = c.department_id
+                WHERE su.enabled = TRUE
+                  AND sr.code = 'ROLE_STUDENT'
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        if (classId != null) {
+            sql.append(" AND su.class_id = :classId");
+            params.addValue("classId", classId);
+        } else if (teacherId != null) {
+            sql.append("""
+                     AND (
+                         EXISTS (
+                             SELECT 1
+                             FROM report_submission rs
+                             JOIN exp_task t ON t.id = rs.task_id
+                             WHERE rs.student_id = su.id
+                               AND t.publisher_id = :teacherId
+                               AND rs.submitted_at BETWEEN :fromTime AND :toTime
+                         )
+                         OR EXISTS (
+                             SELECT 1
+                             FROM experiment_course_enrollment e
+                             JOIN experiment_course ec ON ec.id = e.course_id
+                             WHERE e.student_id = su.id
+                               AND e.status = 'ENROLLED'
+                               AND ec.teacher_id = :teacherId
+                               AND ec.semester_id = :semesterId
+                         )
+                     )
+                    """);
+            params.addValue("teacherId", teacherId);
+            params.addValue("semesterId", filters.semester().getId());
+            params.addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()));
+            params.addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
+        }
+        sql.append(" ORDER BY class_display_name ASC, su.username ASC");
+        return jdbcTemplate.queryForList(sql.toString(), params);
+    }
     private BigDecimal averageScore(Collection<BigDecimal> scores) {
         BigDecimal sum = BigDecimal.ZERO;
         int count = 0;
@@ -1355,3 +2258,4 @@ public class StatisticsService {
     ) {
     }
 }
+

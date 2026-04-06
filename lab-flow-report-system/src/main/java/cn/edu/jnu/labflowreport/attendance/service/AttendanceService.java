@@ -15,6 +15,7 @@ import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceSessionListItemVO
 import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceStudentStatusVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.ExperimentCourseEntity;
@@ -59,6 +60,7 @@ public class AttendanceService {
     private final ExperimentCourseSlotMapper experimentCourseSlotMapper;
     private final ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper;
     private final ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper;
+    private final ExcelExportService excelExportService;
     private final SecureRandom random = new SecureRandom();
     private final int defaultTokenTtlSeconds;
 
@@ -72,6 +74,7 @@ public class AttendanceService {
             ExperimentCourseSlotMapper experimentCourseSlotMapper,
             ExperimentCourseSlotInstanceMapper experimentCourseSlotInstanceMapper,
             ExperimentCourseEnrollmentMapper experimentCourseEnrollmentMapper,
+            ExcelExportService excelExportService,
             @Value("${ATT_TOKEN_TTL_SECONDS:6}") int defaultTokenTtlSeconds
     ) {
         this.sessionMapper = sessionMapper;
@@ -83,6 +86,7 @@ public class AttendanceService {
         this.experimentCourseSlotMapper = experimentCourseSlotMapper;
         this.experimentCourseSlotInstanceMapper = experimentCourseSlotInstanceMapper;
         this.experimentCourseEnrollmentMapper = experimentCourseEnrollmentMapper;
+        this.excelExportService = excelExportService;
         this.defaultTokenTtlSeconds = clampTtl(defaultTokenTtlSeconds);
     }
 
@@ -410,6 +414,75 @@ public class AttendanceService {
             csv.append(csvCell(r.getCheckedInAt())).append("\n");
         }
         return csv.toString();
+    }
+
+    public byte[] exportRecordsExcel(AuthenticatedUser actor, Long sessionId) {
+        TeacherAttendanceSessionDetailVO detail = getTeacherSessionDetail(actor, sessionId);
+        var filterRows = List.of(
+                row("签到场次ID", detail.getSessionId()),
+                row("来源类型", detail.getSourceType()),
+                row("课程名称", detail.getCourseName()),
+                row("场次名称", detail.getSlotName()),
+                row("上课日期", detail.getLessonDate()),
+                row("实验室", detail.getLabRoomName()),
+                row("开始时间", detail.getStartedAt()),
+                row("结束时间", detail.getEndedAt()),
+                row("导出时间", LocalDateTime.now()),
+                row("操作者", actor.username())
+        );
+        var summaryRows = List.of(
+                row(detail.getCourseName(), detail.getSlotName(), detail.getLessonDate(), detail.getLabRoomName(), detail.getCheckedInCount(), detail.getAbsentCount(), detail.getTotalCount())
+        );
+        var recordRows = detail.getRoster().stream()
+                .map(item -> row(
+                        detail.getCourseName(),
+                        detail.getSlotName(),
+                        detail.getLessonDate(),
+                        detail.getLabRoomName(),
+                        item.getStudentDisplayName(),
+                        item.getStudentUsername(),
+                        item.getStatus(),
+                        item.getMethod(),
+                        item.getCheckedInAt()
+                ))
+                .toList();
+        var absentRows = detail.getRoster().stream()
+                .filter(item -> "NOT_CHECKED_IN".equalsIgnoreCase(item.getStatus()))
+                .map(item -> row(
+                        detail.getCourseName(),
+                        detail.getSlotName(),
+                        detail.getLessonDate(),
+                        detail.getLabRoomName(),
+                        item.getStudentDisplayName(),
+                        item.getStudentUsername()
+                ))
+                .toList();
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec("筛选条件", List.of("字段", "值"), filterRows),
+                new ExcelExportService.SheetSpec(
+                        "签到汇总",
+                        List.of("课程", "课次", "日期", "实验室", "已签到", "未签到", "应到"),
+                        summaryRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "签到明细",
+                        List.of("课程", "课次", "日期", "实验室", "学生姓名", "用户名", "签到状态", "签到方式", "签到时间"),
+                        recordRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "未签到名单",
+                        List.of("课程", "课次", "日期", "实验室", "学生姓名", "用户名"),
+                        absentRows
+                )
+        ));
+    }
+
+    private List<?> row(Object... values) {
+        List<Object> row = new ArrayList<>();
+        for (Object value : values) {
+            row.add(value);
+        }
+        return row;
     }
 
     public PageResult<TeacherAttendanceSessionListItemVO> listTeacherSessions(

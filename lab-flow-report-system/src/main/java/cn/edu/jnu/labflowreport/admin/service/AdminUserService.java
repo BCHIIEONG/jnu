@@ -11,6 +11,7 @@ import cn.edu.jnu.labflowreport.admin.dto.PageResult;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity;
@@ -34,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -62,6 +64,7 @@ public class AdminUserService {
     private final AdminAuditService adminAuditService;
     private final ReportSubmissionMapper reportSubmissionMapper;
     private final AttendanceRecordMapper attendanceRecordMapper;
+    private final ExcelExportService excelExportService;
 
     public AdminUserService(
             SysUserMapper sysUserMapper,
@@ -73,7 +76,8 @@ public class AdminUserService {
             PasswordEncoder passwordEncoder,
             AdminAuditService adminAuditService,
             ReportSubmissionMapper reportSubmissionMapper,
-            AttendanceRecordMapper attendanceRecordMapper
+            AttendanceRecordMapper attendanceRecordMapper,
+            ExcelExportService excelExportService
     ) {
         this.sysUserMapper = sysUserMapper;
         this.sysRoleMapper = sysRoleMapper;
@@ -85,6 +89,7 @@ public class AdminUserService {
         this.adminAuditService = adminAuditService;
         this.reportSubmissionMapper = reportSubmissionMapper;
         this.attendanceRecordMapper = attendanceRecordMapper;
+        this.excelExportService = excelExportService;
     }
 
     public PageResult<AdminUserVO> listUsers(
@@ -454,6 +459,46 @@ public class AdminUserService {
 
         adminAuditService.record(actor, AdminAuditActions.USER_EXPORT, "sys_user", null, Map.of("count", vos.size()));
         return csv.toString();
+    }
+
+    public byte[] exportUsersExcel(AuthenticatedUser actor) {
+        List<SysUserEntity> users = sysUserMapper.selectList(new LambdaQueryWrapper<SysUserEntity>().orderByAsc(SysUserEntity::getId));
+        List<AdminUserVO> vos = toUserVOs(users);
+        var summaryRows = vos.stream()
+                .map(u -> List.of(
+                        u.id(),
+                        u.username(),
+                        u.displayName(),
+                        u.enabled(),
+                        String.join(" | ", u.roleCodes()),
+                        u.departmentName(),
+                        u.classDisplayText(),
+                        u.createdAt(),
+                        u.updatedAt()))
+                .toList();
+        Map<String, Long> roleCounts = new LinkedHashMap<>();
+        for (AdminUserVO user : vos) {
+            for (String roleCode : user.roleCodes()) {
+                roleCounts.merge(roleCode, 1L, Long::sum);
+            }
+        }
+        var roleRows = roleCounts.entrySet().stream()
+                .map(entry -> List.of(entry.getKey(), entry.getValue()))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "汇总",
+                        List.of("ID", "用户名", "姓名", "启用", "角色", "院系", "班级", "创建时间", "更新时间"),
+                        summaryRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "角色统计",
+                        List.of("角色编码", "用户数"),
+                        roleRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.USER_EXPORT, "sys_user", null, Map.of("count", vos.size(), "format", "excel"));
+        return bytes;
     }
 
     private void setUserRolesInternal(Long userId, List<String> roleCodes) {

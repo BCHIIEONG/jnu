@@ -3,7 +3,9 @@ package cn.edu.jnu.labflowreport.workflow.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
+import cn.edu.jnu.labflowreport.common.util.ClassDisplayUtils;
 import cn.edu.jnu.labflowreport.common.util.HashUtils;
 import cn.edu.jnu.labflowreport.elective.service.ExperimentCourseService;
 import cn.edu.jnu.labflowreport.persistence.entity.ExpTaskEntity;
@@ -23,6 +25,7 @@ import cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskTargetClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExportRecordMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.OrgClassMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.PlagArtifactFpMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.PlagSubmissionBestMatchMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.PlagTaskRunMapper;
@@ -49,7 +52,9 @@ import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -79,6 +84,8 @@ public class ReportWorkflowService {
     private final PlagArtifactFpMapper plagArtifactFpMapper;
     private final PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper;
     private final ExperimentCourseService experimentCourseService;
+    private final OrgClassMapper orgClassMapper;
+    private final ExcelExportService excelExportService;
 
     public ReportWorkflowService(
             ExpTaskMapper expTaskMapper,
@@ -98,7 +105,9 @@ public class ReportWorkflowService {
             PlagTaskRunMapper plagTaskRunMapper,
             PlagArtifactFpMapper plagArtifactFpMapper,
             PlagSubmissionBestMatchMapper plagSubmissionBestMatchMapper,
-            ExperimentCourseService experimentCourseService
+            ExperimentCourseService experimentCourseService,
+            OrgClassMapper orgClassMapper,
+            ExcelExportService excelExportService
     ) {
         this.expTaskMapper = expTaskMapper;
         this.submissionMapper = submissionMapper;
@@ -118,6 +127,8 @@ public class ReportWorkflowService {
         this.plagArtifactFpMapper = plagArtifactFpMapper;
         this.plagSubmissionBestMatchMapper = plagSubmissionBestMatchMapper;
         this.experimentCourseService = experimentCourseService;
+        this.orgClassMapper = orgClassMapper;
+        this.excelExportService = excelExportService;
     }
 
     @Transactional
@@ -567,6 +578,125 @@ public class ReportWorkflowService {
         return csv.toString();
     }
 
+    @Transactional
+    public byte[] exportScoresExcel(Long taskId, AuthenticatedUser operator) {
+        ensureTeacherOrAdminCanManageTask(taskId, operator);
+        TaskVO task = getTask(taskId);
+        List<SubmissionVO> submissions = submissionMapper.findSubmissionsByTask(taskId);
+        List<ScoreExportRowVO> scoreRows = submissionMapper.findScoreRowsByTask(taskId);
+        List<SysUserEntity> students = sysUserMapper.findStudentsForTask(taskId);
+        Map<Long, String> classDisplayMap = loadClassDisplayMap(students);
+        Map<Long, List<SubmissionVO>> submissionsByStudent = submissions.stream()
+                .collect(Collectors.groupingBy(SubmissionVO::getStudentId));
+
+        var summaryRows = scoreRows.stream()
+                .map(item -> row(
+                        task.getTitle(),
+                        item.getStudentDisplayName(),
+                        item.getStudentUsername(),
+                        item.getVersionNo(),
+                        item.getScore(),
+                        item.getComment(),
+                        item.getSubmittedAt(),
+                        item.getReviewedAt()))
+                .toList();
+
+        var submissionRows = submissions.stream()
+                .map(item -> row(
+                        task.getTitle(),
+                        item.getStudentDisplayName(),
+                        item.getStudentUsername(),
+                        classDisplayMap.get(item.getStudentId()),
+                        item.getVersionNo(),
+                        item.getSubmitStatus(),
+                        item.getSubmittedAt()))
+                .toList();
+
+        var unsubmittedRows = students.stream()
+                .filter(student -> !submissionsByStudent.containsKey(student.getId()))
+                .map(student -> row(
+                        task.getTitle(),
+                        student.getDisplayName(),
+                        student.getUsername(),
+                        classDisplayMap.get(student.getId()),
+                        "是"))
+                .toList();
+
+        var reviewRows = scoreRows.stream()
+                .filter(row -> row.getReviewedAt() != null || row.getScore() != null || (row.getComment() != null && !row.getComment().isBlank()))
+                .map(item -> row(
+                        task.getTitle(),
+                        item.getStudentDisplayName(),
+                        item.getStudentUsername(),
+                        classDisplayMap.get(findStudentIdByUsername(students, item.getStudentUsername())),
+                        item.getVersionNo(),
+                        item.getScore(),
+                        item.getComment(),
+                        item.getReviewedAt()))
+                .toList();
+
+        var completionRows = students.stream()
+                .map(student -> {
+                    TaskCompletionEntity completion = taskCompletionMapper.findByTaskAndStudent(taskId, student.getId());
+                    return row(
+                            task.getTitle(),
+                            student.getDisplayName(),
+                            student.getUsername(),
+                            classDisplayMap.get(student.getId()),
+                            completion == null ? "NONE" : completion.getStatus(),
+                            completion == null ? null : completion.getCompletionSource(),
+                            completion == null ? null : completion.getRequestedAt(),
+                            completion == null ? null : completion.getConfirmedAt(),
+                            completion == null ? null : resolveUserDisplayName(completion.getConfirmedBy()));
+                })
+                .toList();
+
+        ExportRecordEntity record = new ExportRecordEntity();
+        record.setOperatorId(operator.userId());
+        record.setExportType("TASK_SCORE_EXCEL");
+        record.setConditionJson("{\"taskId\":" + taskId + "}");
+        record.setCreatedAt(LocalDateTime.now());
+        exportRecordMapper.insert(record);
+
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "筛选条件",
+                        List.of("字段", "值"),
+                        List.of(
+                                row("任务ID", taskId),
+                                row("任务标题", task.getTitle()),
+                                row("导出时间", LocalDateTime.now()),
+                                row("操作者", operator.username())
+                        )
+                ),
+                new ExcelExportService.SheetSpec(
+                        "成绩汇总",
+                        List.of("任务", "学生姓名", "用户名", "版本号", "分数", "批语", "提交时间", "批阅时间"),
+                        summaryRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "提交明细",
+                        List.of("任务", "学生姓名", "用户名", "班级", "版本号", "提交状态", "提交时间"),
+                        submissionRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "未提交名单",
+                        List.of("任务", "学生姓名", "用户名", "班级", "任务可见"),
+                        unsubmittedRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "批阅明细",
+                        List.of("任务", "学生姓名", "用户名", "班级", "版本号", "分数", "批语", "批阅时间"),
+                        reviewRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "完成登记明细",
+                        List.of("任务", "学生姓名", "用户名", "班级", "完成状态", "完成来源", "申请时间", "确认时间", "确认教师"),
+                        completionRows
+                )
+        ));
+    }
+
     private void ensureTaskExists(Long taskId) {
         ExpTaskEntity task = expTaskMapper.selectById(taskId);
         if (task == null) {
@@ -680,6 +810,42 @@ public class ReportWorkflowService {
         }
         String text = String.valueOf(value).replace("\"", "\"\"");
         return "\"" + text + "\"";
+    }
+
+    private Map<Long, String> loadClassDisplayMap(List<SysUserEntity> students) {
+        Set<Long> classIds = students.stream().map(SysUserEntity::getClassId).filter(Objects::nonNull).collect(Collectors.toSet());
+        if (classIds.isEmpty()) {
+            return Map.of();
+        }
+        return orgClassMapper.selectBatchIds(classIds).stream()
+                .collect(Collectors.toMap(
+                        cn.edu.jnu.labflowreport.persistence.entity.OrgClassEntity::getId,
+                        item -> ClassDisplayUtils.effectiveDisplayName(item.getGrade(), item.getName())
+                ));
+    }
+
+    private Long findStudentIdByUsername(List<SysUserEntity> students, String username) {
+        return students.stream()
+                .filter(item -> Objects.equals(item.getUsername(), username))
+                .map(SysUserEntity::getId)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<?> row(Object... values) {
+        List<Object> row = new ArrayList<>();
+        for (Object value : values) {
+            row.add(value);
+        }
+        return row;
+    }
+
+    private String resolveUserDisplayName(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        SysUserEntity user = sysUserMapper.selectById(userId);
+        return user == null ? null : user.getDisplayName();
     }
 
     private List<TaskAttachmentVO> listTaskAttachmentVos(Long taskId) {

@@ -3,6 +3,7 @@ package cn.edu.jnu.labflowreport.controller;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
@@ -28,12 +29,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api")
@@ -179,23 +180,16 @@ public class ReportWorkflowController {
 
     @GetMapping("/tasks/{taskId}/scores/export")
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
-    public ResponseEntity<byte[]> exportTaskScores(@PathVariable Long taskId) throws IOException {
+    public ResponseEntity<byte[]> exportTaskScores(@PathVariable Long taskId) throws Exception {
         AuthenticatedUser user = SecurityUtils.currentUser();
-        String csv = reportWorkflowService.exportScoresCsv(taskId, user);
-        String filename = "task-" + taskId + "-scores.csv";
+        return ExportResponseHelper.csv("task-" + taskId + "-scores.csv", reportWorkflowService.exportScoresCsv(taskId, user));
+    }
 
-        // Excel on Windows often mis-detects UTF-8 CSV; prepend BOM to make UTF-8 explicit.
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .body(out.toByteArray());
+    @GetMapping("/tasks/{taskId}/scores/export/excel")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportTaskScoresExcel(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("task-" + taskId + "-scores.xlsx", reportWorkflowService.exportScoresExcel(taskId, user));
     }
 
     @PutMapping("/tasks/{taskId}/status")

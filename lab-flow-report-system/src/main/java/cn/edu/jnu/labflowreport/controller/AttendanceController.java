@@ -14,13 +14,10 @@ import cn.edu.jnu.labflowreport.attendance.vo.AttendanceTokenVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.auth.security.SecurityUtils;
 import cn.edu.jnu.labflowreport.common.api.ApiResponse;
+import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -129,20 +126,14 @@ public class AttendanceController {
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
     public ResponseEntity<byte[]> export(@PathVariable Long sessionId) throws Exception {
         AuthenticatedUser actor = SecurityUtils.currentUser();
-        String csv = attendanceService.exportRecordsCsv(actor, sessionId);
-        String filename = "attendance-session-" + sessionId + ".csv";
+        return ExportResponseHelper.csv("attendance-session-" + sessionId + ".csv", attendanceService.exportRecordsCsv(actor, sessionId));
+    }
 
-        byte[] csvBytes = csv.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(csvBytes.length + 3);
-        out.write(0xEF);
-        out.write(0xBB);
-        out.write(0xBF);
-        out.write(csvBytes);
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .body(out.toByteArray());
+    @GetMapping("/sessions/{sessionId}/export/excel")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportExcel(@PathVariable Long sessionId) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("attendance-session-" + sessionId + ".xlsx", attendanceService.exportRecordsExcel(actor, sessionId));
     }
 
     public record CheckinResponse(Long recordId, boolean alreadyCheckedIn, String checkedInAt) {

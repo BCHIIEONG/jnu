@@ -7,6 +7,7 @@ import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomRequest;
 import cn.edu.jnu.labflowreport.admin.dto.AdminLabRoomVO;
 import cn.edu.jnu.labflowreport.auth.model.AuthenticatedUser;
 import cn.edu.jnu.labflowreport.common.api.ApiCode;
+import cn.edu.jnu.labflowreport.common.export.ExcelExportService;
 import cn.edu.jnu.labflowreport.common.exception.BusinessException;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.LabRoomOpenSlotEntity;
@@ -32,15 +33,18 @@ public class LabRoomManagementService {
     private final LabRoomMapper labRoomMapper;
     private final LabRoomOpenSlotMapper labRoomOpenSlotMapper;
     private final AdminAuditService adminAuditService;
+    private final ExcelExportService excelExportService;
 
     public LabRoomManagementService(
             LabRoomMapper labRoomMapper,
             LabRoomOpenSlotMapper labRoomOpenSlotMapper,
-            AdminAuditService adminAuditService
+            AdminAuditService adminAuditService,
+            ExcelExportService excelExportService
     ) {
         this.labRoomMapper = labRoomMapper;
         this.labRoomOpenSlotMapper = labRoomOpenSlotMapper;
         this.adminAuditService = adminAuditService;
+        this.excelExportService = excelExportService;
     }
 
     public List<AdminLabRoomVO> listLabRooms() {
@@ -134,6 +138,38 @@ public class LabRoomManagementService {
         }
         adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_EXPORT, "lab_room", null, Map.of("count", rooms.size()));
         return csv.toString();
+    }
+
+    public byte[] exportLabRoomsExcel(AuthenticatedUser actor) {
+        List<AdminLabRoomVO> rooms = listLabRooms();
+        var roomRows = rooms.stream()
+                .map(room -> List.of(room.id(), room.name(), room.location(), room.openHours(), room.createdAt(), room.updatedAt()))
+                .toList();
+        var slotRows = rooms.stream()
+                .flatMap(room -> room.openSlots().stream().map(slot -> List.of(
+                        room.id(),
+                        room.name(),
+                        weekdayLabel(slot.weekday()),
+                        slot.startTime(),
+                        slot.endTime(),
+                        slot.createdAt(),
+                        slot.updatedAt()
+                )))
+                .toList();
+        byte[] bytes = excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "实验室",
+                        List.of("ID", "名称", "地点", "开放时间摘要", "创建时间", "更新时间"),
+                        roomRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "开放时段明细",
+                        List.of("实验室ID", "实验室名称", "星期", "开始时间", "结束时间", "创建时间", "更新时间"),
+                        slotRows
+                )
+        ));
+        adminAuditService.record(actor, AdminAuditActions.LAB_ROOM_EXPORT, "lab_room", null, Map.of("count", rooms.size(), "format", "excel"));
+        return bytes;
     }
 
     private Map<Long, List<LabRoomOpenSlotEntity>> loadSlotMap(List<Long> labRoomIds) {

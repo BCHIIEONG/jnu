@@ -141,6 +141,19 @@ async function exportCsv(path: string, fallbackFilename: string) {
   }
 }
 
+async function exportExcel(path: string, fallbackFilename: string) {
+  try {
+    const suffix = buildQueryString()
+    await downloadBlob(`${path}${suffix ? `?${suffix}` : ''}`, {
+      token: auth.token,
+      fallbackFilename,
+    })
+    ElMessage.success('导出成功')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '导出失败')
+  }
+}
+
 function formatRate(value?: number | null) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '0.00%'
   return `${(value * 100).toFixed(2)}%`
@@ -186,7 +199,10 @@ onMounted(async () => {
       <template #header>
         <div class="sectionHeader">
           <span>教师统计</span>
-          <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/teachers/export', 'admin-teacher-stats.csv')">导出 CSV</el-button>
+          <div class="filterRow">
+            <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/teachers/export', 'admin-teacher-stats.csv')">导出 CSV</el-button>
+            <el-button size="small" type="primary" plain @click="exportExcel('/api/admin/statistics/reports/teachers/export/excel', 'admin-teacher-stats.xlsx')">导出 Excel</el-button>
+          </div>
         </div>
       </template>
       <template v-if="!isMobile">
@@ -214,7 +230,10 @@ onMounted(async () => {
       <template #header>
         <div class="sectionHeader">
           <span>班级统计</span>
-          <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/classes/export', 'admin-class-stats.csv')">导出 CSV</el-button>
+          <div class="filterRow">
+            <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/classes/export', 'admin-class-stats.csv')">导出 CSV</el-button>
+            <el-button size="small" type="primary" plain @click="exportExcel('/api/admin/statistics/reports/classes/export/excel', 'admin-class-stats.xlsx')">导出 Excel</el-button>
+          </div>
         </div>
       </template>
       <template v-if="!isMobile">
@@ -241,7 +260,10 @@ onMounted(async () => {
       <template #header>
         <div class="sectionHeader">
           <span>实验课程统计</span>
-          <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/experiment-courses/export', 'admin-experiment-course-stats.csv')">导出 CSV</el-button>
+          <div class="filterRow">
+            <el-button size="small" @click="exportCsv('/api/admin/statistics/reports/experiment-courses/export', 'admin-experiment-course-stats.csv')">导出 CSV</el-button>
+            <el-button size="small" type="primary" plain @click="exportExcel('/api/admin/statistics/reports/experiment-courses/export/excel', 'admin-experiment-course-stats.xlsx')">导出 Excel</el-button>
+          </div>
         </div>
       </template>
       <template v-if="!isMobile">
