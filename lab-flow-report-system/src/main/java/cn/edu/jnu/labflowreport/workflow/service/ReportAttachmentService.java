@@ -28,17 +28,20 @@ public class ReportAttachmentService {
     private final ReportAttachmentMapper attachmentMapper;
     private final FileStorageService storageService;
     private final ExpTaskMapper expTaskMapper;
+    private final ReportWorkflowService reportWorkflowService;
 
     public ReportAttachmentService(
             ReportSubmissionMapper submissionMapper,
             ReportAttachmentMapper attachmentMapper,
             FileStorageService storageService,
-            ExpTaskMapper expTaskMapper
+            ExpTaskMapper expTaskMapper,
+            ReportWorkflowService reportWorkflowService
     ) {
         this.submissionMapper = submissionMapper;
         this.attachmentMapper = attachmentMapper;
         this.storageService = storageService;
         this.expTaskMapper = expTaskMapper;
+        this.reportWorkflowService = reportWorkflowService;
     }
 
     public List<AttachmentVO> listAttachments(Long submissionId, AuthenticatedUser user) {
@@ -122,7 +125,15 @@ public class ReportAttachmentService {
     }
 
     private void ensureCanAccessSubmission(Long submissionId, AuthenticatedUser user) {
-        if (user.roleCodes().contains("ROLE_TEACHER") || user.roleCodes().contains("ROLE_ADMIN")) {
+        if (user.roleCodes().contains("ROLE_ADMIN")) {
+            return;
+        }
+        if (user.roleCodes().contains("ROLE_TEACHER")) {
+            Long taskId = submissionMapper.findTaskIdBySubmissionId(submissionId);
+            if (taskId == null) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "提交记录不存在");
+            }
+            reportWorkflowService.ensureTeacherOrAdminCanManageTask(taskId, user);
             return;
         }
         ensureOwner(submissionId, user);

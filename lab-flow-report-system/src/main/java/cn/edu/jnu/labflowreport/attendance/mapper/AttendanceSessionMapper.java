@@ -86,7 +86,7 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                    s.status,
                    COALESCE(rec.checked_in_count, 0) AS checked_in_count,
                    CASE
-                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp_roster.total_count, 0)
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(snap_roster.total_count, exp_roster.total_count, 0)
                      ELSE COALESCE(class_roster.total_count, 0)
                    END AS total_count
             FROM attendance_session s
@@ -113,6 +113,11 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                   AND sr.code = 'ROLE_STUDENT'
                 GROUP BY su.class_id
             ) class_roster ON class_roster.class_id = s.class_id
+            LEFT JOIN (
+                SELECT session_id, COUNT(*) AS total_count
+                FROM attendance_session_roster
+                GROUP BY session_id
+            ) snap_roster ON snap_roster.session_id = s.id
             LEFT JOIN (
                 SELECT slot_id, COUNT(*) AS total_count
                 FROM experiment_course_enrollment
@@ -218,7 +223,7 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                    s.status,
                    COALESCE(rec.checked_in_count, 0) AS checked_in_count,
                    CASE
-                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp_roster.total_count, 0)
+                     WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(snap_roster.total_count, exp_roster.total_count, 0)
                      ELSE COALESCE(class_roster.total_count, 0)
                    END AS total_count
             FROM attendance_session s
@@ -245,6 +250,11 @@ public interface AttendanceSessionMapper extends BaseMapper<AttendanceSessionEnt
                   AND sr.code = 'ROLE_STUDENT'
                 GROUP BY su.class_id
             ) class_roster ON class_roster.class_id = s.class_id
+            LEFT JOIN (
+                SELECT session_id, COUNT(*) AS total_count
+                FROM attendance_session_roster
+                GROUP BY session_id
+            ) snap_roster ON snap_roster.session_id = s.id
             LEFT JOIN (
                 SELECT slot_id, COUNT(*) AS total_count
                 FROM experiment_course_enrollment

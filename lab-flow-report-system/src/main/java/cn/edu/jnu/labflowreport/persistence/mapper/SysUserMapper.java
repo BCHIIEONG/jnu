@@ -41,10 +41,13 @@ public interface SysUserMapper extends BaseMapper<SysUserEntity> {
               AND r.code = 'ROLE_STUDENT'
               AND (
                     (
-                        NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
-                        AND NOT EXISTS (SELECT 1 FROM exp_task t WHERE t.id = #{taskId} AND t.experiment_course_id IS NOT NULL)
+                        NOT EXISTS (SELECT 1 FROM exp_task t WHERE t.id = #{taskId} AND t.experiment_course_id IS NOT NULL)
+                        AND NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
                     )
-                    OR su.class_id IN (SELECT tc.class_id FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
+                    OR (
+                        EXISTS (SELECT 1 FROM exp_task t WHERE t.id = #{taskId} AND t.experiment_course_id IS NULL)
+                        AND su.class_id IN (SELECT tc.class_id FROM exp_task_target_class tc WHERE tc.task_id = #{taskId})
+                    )
                     OR EXISTS (
                         SELECT 1
                         FROM experiment_course_enrollment e

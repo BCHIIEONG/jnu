@@ -552,6 +552,11 @@ public class ExperimentCourseService {
             if (nvl(experimentCourseEnrollmentMapper.countEnrolledBySlotId(existing.getId())) > 0) {
                 throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "已有学生选择该场次，不能直接删除");
             }
+            if (slotHasAttendanceHistory(existing.getId())) {
+                throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该场次已有历史签到记录，不能删除");
+            }
+            experimentCourseSlotInstanceMapper.delete(new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>()
+                    .eq(ExperimentCourseSlotInstanceEntity::getSlotGroupId, existing.getId()));
             experimentCourseSlotMapper.deleteById(existing.getId());
         }
     }
@@ -578,9 +583,69 @@ public class ExperimentCourseService {
     }
 
     private void rebuildInstances(ExperimentCourseSlotEntity slot, SemesterEntity semester, int slotIndex) {
+        if (slotHasAttendanceHistory(slot.getId())) {
+            rebuildFutureInstances(slot, semester, slotIndex);
+            return;
+        }
         experimentCourseSlotInstanceMapper.delete(new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>()
                 .eq(ExperimentCourseSlotInstanceEntity::getSlotGroupId, slot.getId()));
         for (InstanceDraft draft : buildInstanceDrafts(slot, semester, slotIndex)) {
+            ExperimentCourseSlotInstanceEntity entity = new ExperimentCourseSlotInstanceEntity();
+            entity.setCourseId(slot.getCourseId());
+            entity.setSlotGroupId(slot.getId());
+            entity.setLessonDate(draft.lessonDate());
+            entity.setTeachingWeek(draft.teachingWeek());
+            entity.setDisplayName(draft.displayName());
+            entity.setSlotId(slot.getSlotId());
+            entity.setLabRoomId(slot.getLabRoomId());
+            entity.setCapacity(slot.getCapacity());
+            entity.setCreatedAt(LocalDateTime.now());
+            experimentCourseSlotInstanceMapper.insert(entity);
+        }
+    }
+
+    private void rebuildFutureInstances(ExperimentCourseSlotEntity slot, SemesterEntity semester, int slotIndex) {
+        List<ExperimentCourseSlotInstanceEntity> existingInstances = experimentCourseSlotInstanceMapper.selectList(
+                new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>()
+                        .eq(ExperimentCourseSlotInstanceEntity::getSlotGroupId, slot.getId())
+                        .orderByAsc(ExperimentCourseSlotInstanceEntity::getLessonDate, ExperimentCourseSlotInstanceEntity::getId));
+        Set<Long> protectedInstanceIds = attendanceSessionMapper.selectList(
+                        new LambdaQueryWrapper<AttendanceSessionEntity>()
+                                .eq(AttendanceSessionEntity::getExperimentCourseSlotId, slot.getId())
+                                .isNotNull(AttendanceSessionEntity::getExperimentCourseInstanceId))
+                .stream()
+                .map(AttendanceSessionEntity::getExperimentCourseInstanceId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (protectedInstanceIds.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该场次已有历史签到记录，但缺少历史课次实例，无法自动重建");
+        }
+        Map<Long, ExperimentCourseSlotInstanceEntity> existingById = existingInstances.stream()
+                .collect(Collectors.toMap(ExperimentCourseSlotInstanceEntity::getId, x -> x));
+        List<ExperimentCourseSlotInstanceEntity> protectedInstances = protectedInstanceIds.stream()
+                .map(existingById::get)
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(ExperimentCourseSlotInstanceEntity::getLessonDate)
+                        .thenComparing(ExperimentCourseSlotInstanceEntity::getId))
+                .toList();
+        if (protectedInstances.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "该场次已有历史签到记录，但缺少历史课次实例，无法自动重建");
+        }
+        LocalDate cutoffDate = protectedInstances.get(protectedInstances.size() - 1).getLessonDate();
+        Set<LocalDate> protectedDates = protectedInstances.stream()
+                .map(ExperimentCourseSlotInstanceEntity::getLessonDate)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        experimentCourseSlotInstanceMapper.delete(new LambdaQueryWrapper<ExperimentCourseSlotInstanceEntity>()
+                .eq(ExperimentCourseSlotInstanceEntity::getSlotGroupId, slot.getId())
+                .gt(ExperimentCourseSlotInstanceEntity::getLessonDate, cutoffDate)
+                .notIn(!protectedInstanceIds.isEmpty(), ExperimentCourseSlotInstanceEntity::getId, protectedInstanceIds));
+
+        List<InstanceDraft> futureDrafts = buildInstanceDrafts(slot, semester, slotIndex).stream()
+                .filter(draft -> draft.lessonDate().isAfter(cutoffDate))
+                .filter(draft -> !protectedDates.contains(draft.lessonDate()))
+                .toList();
+        for (InstanceDraft draft : futureDrafts) {
             ExperimentCourseSlotInstanceEntity entity = new ExperimentCourseSlotInstanceEntity();
             entity.setCourseId(slot.getCourseId());
             entity.setSlotGroupId(slot.getId());

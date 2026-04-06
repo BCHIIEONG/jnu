@@ -63,10 +63,12 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
             LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
             WHERE (
                 (
-                    NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
-                    AND t.experiment_course_id IS NULL
+                    t.experiment_course_id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
                 )
-                OR EXISTS (
+                OR (
+                    t.experiment_course_id IS NULL
+                    AND EXISTS (
                     SELECT 1
                     FROM exp_task_target_class tc
                     JOIN sys_user su ON su.id = #{studentId}
@@ -74,12 +76,16 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                       AND su.class_id IS NOT NULL
                       AND tc.class_id = su.class_id
                 )
-                OR EXISTS (
+                )
+                OR (
+                    t.experiment_course_id IS NOT NULL
+                    AND EXISTS (
                     SELECT 1
                     FROM experiment_course_enrollment e
                     WHERE e.course_id = t.experiment_course_id
                       AND e.student_id = #{studentId}
                       AND e.status = 'ENROLLED'
+                )
                 )
             )
             ORDER BY t.created_at DESC
@@ -114,22 +120,28 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
             WHERE t.id = #{taskId}
               AND (
                   (
-                      NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
-                      AND t.experiment_course_id IS NULL
+                      t.experiment_course_id IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id)
                   )
-                  OR EXISTS (
+                  OR (
+                      t.experiment_course_id IS NULL
+                      AND EXISTS (
                       SELECT 1
                       FROM exp_task_target_class tc
                       WHERE tc.task_id = t.id
                         AND su.class_id IS NOT NULL
                         AND tc.class_id = su.class_id
                   )
-                  OR EXISTS (
+                  )
+                  OR (
+                      t.experiment_course_id IS NOT NULL
+                      AND EXISTS (
                       SELECT 1
                       FROM experiment_course_enrollment e
                       WHERE e.course_id = t.experiment_course_id
                         AND e.student_id = #{studentId}
                         AND e.status = 'ENROLLED'
+                  )
                   )
               )
             """)

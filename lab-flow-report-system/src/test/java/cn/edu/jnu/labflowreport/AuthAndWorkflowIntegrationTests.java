@@ -207,6 +207,77 @@ class AuthAndWorkflowIntegrationTests {
     }
 
     @Test
+    void otherTeacherShouldNotAccessAnotherTeachersSubmissionResources() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+        String studentToken = login("student", "student123");
+
+        String otherTeacher = "review_guard_" + System.currentTimeMillis();
+        createUser(adminToken, otherTeacher, otherTeacher, "teacher123", null, "[\"ROLE_TEACHER\"]", null);
+        String otherTeacherToken = login(otherTeacher, "teacher123");
+
+        MvcResult createTaskResult = mockMvc.perform(post("/api/tasks")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"越权提交流测试","description":"教师越权应被拦截"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long taskId = ((Number) JsonPath.read(createTaskResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MvcResult submitResult = mockMvc.perform(post("/api/tasks/" + taskId + "/submissions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contentMd":"# 越权测试\\n正文"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long submissionId = ((Number) JsonPath.read(submitResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MockMultipartFile file = new MockMultipartFile("file", "guard.txt", "text/plain", "guard".getBytes());
+        MvcResult uploadResult = mockMvc.perform(multipart("/api/submissions/" + submissionId + "/attachments")
+                        .file(file)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + studentToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        long attachmentId = ((Number) JsonPath.read(uploadResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        mockMvc.perform(post("/api/submissions/" + submissionId + "/review")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"score":90,"comment":"主教师批阅"}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/submissions/" + submissionId + "/review")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherTeacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"score":60,"comment":"越权批阅"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/submissions/" + submissionId + "/review")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherTeacherToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/submissions/" + submissionId + "/attachments")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherTeacherToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/attachments/" + attachmentId + "/download")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherTeacherToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/submissions/" + submissionId + "/content/download")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherTeacherToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void taskAttachmentsShouldUploadListDownloadAndDelete() throws Exception {
         String teacherToken = login("teacher", "teacher123");
         String studentToken = login("student", "student123");

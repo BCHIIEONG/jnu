@@ -505,10 +505,7 @@ public class ReportWorkflowService {
 
     @Transactional
     public ReviewVO reviewSubmission(Long submissionId, AuthenticatedUser teacher, ReviewCreateRequest request) {
-        Long studentId = submissionMapper.findStudentIdBySubmissionId(submissionId);
-        if (studentId == null) {
-            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "提交记录不存在");
-        }
+        ensureTeacherOrAdminCanAccessSubmission(submissionId, teacher);
 
         ReportReviewEntity review = reviewMapper.selectOne(
                 new LambdaQueryWrapper<ReportReviewEntity>()
@@ -540,7 +537,11 @@ public class ReportWorkflowService {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "该提交尚未批阅");
         }
 
-        if (user.roleCodes().contains("ROLE_TEACHER") || user.roleCodes().contains("ROLE_ADMIN")) {
+        if (user.roleCodes().contains("ROLE_ADMIN")) {
+            return review;
+        }
+        if (user.roleCodes().contains("ROLE_TEACHER")) {
+            ensureTeacherOrAdminCanAccessSubmission(submissionId, user);
             return review;
         }
 
@@ -740,7 +741,7 @@ public class ReportWorkflowService {
         ensureStudentCanAccessTask(taskId, student.userId());
     }
 
-    private void ensureTeacherOrAdminCanManageTask(Long taskId, AuthenticatedUser actor) {
+    void ensureTeacherOrAdminCanManageTask(Long taskId, AuthenticatedUser actor) {
         if (actor == null || actor.roleCodes() == null) {
             throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "未登录或登录已失效");
         }
@@ -754,6 +755,14 @@ public class ReportWorkflowService {
         if (task.getPublisherId() == null || !task.getPublisherId().equals(actor.userId())) {
             throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只能管理自己发布的任务");
         }
+    }
+
+    private void ensureTeacherOrAdminCanAccessSubmission(Long submissionId, AuthenticatedUser actor) {
+        Long taskId = submissionMapper.findTaskIdBySubmissionId(submissionId);
+        if (taskId == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "提交记录不存在");
+        }
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
     }
 
     private ReportSubmissionEntity findLatestSubmissionEntity(Long taskId, Long studentId) {

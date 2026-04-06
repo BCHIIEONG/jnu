@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -467,6 +468,229 @@ class ExperimentCourseIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString(enrolledUsername)))
                 .andExpect(content().string(not(containsString(notEnrolledUsername))));
+    }
+
+    @Test
+    void experimentCourseAttendanceSnapshotAndHistoricalSlotEditShouldWork() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String teacherToken = login("teacher", "teacher123");
+
+        long departmentId = createDepartment(adminToken, "实验课程历史院系_" + System.currentTimeMillis());
+        long classId = createClass(adminToken, departmentId, 2026, "实验课程历史班");
+
+        String enrolledUsername = "ec_hist_" + System.currentTimeMillis();
+        createUser(adminToken, enrolledUsername, "历史签到学生", "student123", classId, "[\"ROLE_STUDENT\"]", null);
+        String enrolledToken = login(enrolledUsername, "student123");
+        long studentId = findUserId(adminToken, enrolledUsername);
+
+        TeacherMeta meta = loadTeacherMeta(teacherToken);
+        LocalDate firstLessonDate = meta.semesterStartDate().plusDays(1);
+        String courseTitle = "实验课程历史保护_" + System.currentTimeMillis();
+
+        MvcResult createCourseResult = mockMvc.perform(post("/api/teacher/experiment-courses")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"历史签到与未来课次重建",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[%d],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "name":"历史保护场次",
+                                      "mode":"RECURRING",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5,
+                                      "repeatPattern":"EVERY_WEEK",
+                                      "rangeMode":"DATE_RANGE",
+                                      "rangeStartDate":"%s",
+                                      "rangeEndDate":"%s"
+                                    },
+                                    {
+                                      "name":"普通场次",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                classId,
+                                firstLessonDate,
+                                meta.slotId(),
+                                meta.labRoomId(),
+                                firstLessonDate,
+                                firstLessonDate.plusWeeks(2),
+                                firstLessonDate.plusWeeks(3),
+                                meta.slotId(),
+                                meta.labRoomId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slots[0].instances.length()").value(3))
+                .andReturn();
+
+        long courseId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+        long slotGroupId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].id")).longValue();
+        long firstInstanceId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].instances[0].id")).longValue();
+        long otherSlotId = ((Number) JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[1].id")).longValue();
+        String historicalFirstDate = JsonPath.read(createCourseResult.getResponse().getContentAsString(), "$.data.slots[0].instances[0].lessonDate");
+
+        mockMvc.perform(post("/api/student/experiment-courses/" + courseId + "/enroll")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + enrolledToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"slotId":%d}
+                                """.formatted(slotGroupId)))
+                .andExpect(status().isOk());
+
+        MvcResult sessionResult = mockMvc.perform(post("/api/attendance/sessions")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"experimentCourseInstanceId":%d,"tokenTtlSeconds":30}
+                                """.formatted(firstInstanceId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        long sessionId = ((Number) JsonPath.read(sessionResult.getResponse().getContentAsString(), "$.data.id")).longValue();
+
+        MvcResult staticCodeResult = mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/static-code")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        String staticCode = JsonPath.read(staticCodeResult.getResponse().getContentAsString(), "$.data.code");
+
+        mockMvc.perform(post("/api/teacher/experiment-courses/" + courseId + "/roster/remove")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentId":%d}
+                                """.formatted(studentId)))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/attendance/checkin/static")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + enrolledToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"code":"%s"}
+                                """.formatted(staticCode)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.alreadyCheckedIn").value(false));
+
+        mockMvc.perform(get("/api/teacher/attendance/sessions/" + sessionId + "/detail")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.totalCount").value(1))
+                .andExpect(content().string(containsString(enrolledUsername)));
+
+        mockMvc.perform(get("/api/attendance/sessions/" + sessionId + "/export")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(enrolledUsername)));
+
+        MvcResult updateResult = mockMvc.perform(put("/api/teacher/experiment-courses/" + courseId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"历史签到与未来课次重建-更新后",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[%d],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "id":%d,
+                                      "name":"历史保护场次（更新）",
+                                      "mode":"RECURRING",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":6,
+                                      "repeatPattern":"EVERY_WEEK",
+                                      "rangeMode":"DATE_RANGE",
+                                      "rangeStartDate":"%s",
+                                      "rangeEndDate":"%s"
+                                    },
+                                    {
+                                      "id":%d,
+                                      "name":"普通场次",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                classId,
+                                slotGroupId,
+                                firstLessonDate.plusDays(1),
+                                meta.slotId(),
+                                meta.labRoomId(),
+                                firstLessonDate.plusDays(1),
+                                firstLessonDate.plusWeeks(3),
+                                otherSlotId,
+                                firstLessonDate.plusWeeks(3),
+                                meta.slotId(),
+                                meta.labRoomId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.slots[0].instances[0].id").value(firstInstanceId))
+                .andExpect(jsonPath("$.data.slots[0].instances[0].lessonDate").value(historicalFirstDate))
+                .andReturn();
+
+        String updatedBody = updateResult.getResponse().getContentAsString();
+        List<String> updatedDates = JsonPath.read(updatedBody, "$.data.slots[0].instances[*].lessonDate");
+        org.junit.jupiter.api.Assertions.assertTrue(updatedDates.contains(historicalFirstDate));
+        org.junit.jupiter.api.Assertions.assertTrue(updatedDates.contains(firstLessonDate.plusDays(1).plusWeeks(1).toString()));
+
+        mockMvc.perform(put("/api/teacher/experiment-courses/" + courseId)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "title":"%s",
+                                  "description":"尝试删除历史场次",
+                                  "semesterId":%d,
+                                  "enrollDeadlineAt":"%s",
+                                  "targetClassIds":[%d],
+                                  "targetStudentIds":[],
+                                  "slots":[
+                                    {
+                                      "id":%d,
+                                      "name":"普通场次",
+                                      "mode":"SINGLE",
+                                      "firstLessonDate":"%s",
+                                      "slotId":%d,
+                                      "labRoomId":%d,
+                                      "capacity":5
+                                    }
+                                  ]
+                                }
+                                """.formatted(
+                                courseTitle,
+                                meta.semesterId(),
+                                LocalDateTime.now().plusDays(5).withNano(0),
+                                classId,
+                                otherSlotId,
+                                firstLessonDate.plusWeeks(3),
+                                meta.slotId(),
+                                meta.labRoomId())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("该场次已有历史签到记录，不能删除"));
     }
 
     @Test

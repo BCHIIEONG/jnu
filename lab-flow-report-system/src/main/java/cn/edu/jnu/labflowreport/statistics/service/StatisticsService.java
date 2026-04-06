@@ -647,7 +647,7 @@ public class StatisticsService {
         if (adminView && classId != null) {
             sql.append("""
                      AND (
-                        EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id AND tc.class_id = :classId)
+                        (t.experiment_course_id IS NULL AND EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id AND tc.class_id = :classId))
                         OR EXISTS (
                             SELECT 1 FROM report_submission rs
                             JOIN sys_user su ON su.id = rs.student_id
@@ -926,13 +926,28 @@ public class StatisticsService {
                 %s
                 GROUP BY ar.session_id
                 """.formatted(classId == null ? "" : "JOIN sys_user su_rec ON su_rec.id = ar.student_id WHERE su_rec.class_id = :classId");
-        String enrolledSql = """
-                SELECT e.slot_id, COUNT(*) AS total_count
-                FROM experiment_course_enrollment e
+        String experimentRosterSql = """
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN attendance_session_roster asr ON asr.session_id = ats.id
+                JOIN sys_user su ON su.id = asr.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                UNION ALL
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN experiment_course_enrollment e ON e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
+                JOIN sys_user su ON su.id = e.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                  AND NOT EXISTS (SELECT 1 FROM attendance_session_roster sr WHERE sr.session_id = ats.id)
+                """;
+        String experimentRosterCountSql = """
+                SELECT roster.session_id, COUNT(DISTINCT roster.student_id) AS total_count
+                FROM (%s) roster
                 %s
-                WHERE e.status = 'ENROLLED'
-                GROUP BY e.slot_id
-                """.formatted(classId == null ? "" : "JOIN sys_user su_enroll ON su_enroll.id = e.student_id AND su_enroll.class_id = :classId");
+                GROUP BY roster.session_id
+                """.formatted(
+                experimentRosterSql,
+                classId == null ? "" : "WHERE roster.class_id = :classId");
         String classRosterSql = """
                 SELECT su.class_id, COUNT(*) AS total_count
                 FROM sys_user su
@@ -944,19 +959,19 @@ public class StatisticsService {
                   %s
                 GROUP BY su.class_id
                 """.formatted(classId == null ? "" : "AND su.class_id = :classId");
-        StringBuilder sql = new StringBuilder("""
-                SELECT s.id AS session_id,
-                       s.teacher_id,
-                       s.experiment_course_id,
-                       CAST(s.started_at AS DATE) AS stat_day,
-                       COALESCE(rec.checked_in_count, 0) AS checked_in_count,
-                       CASE
-                         WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp.total_count, 0)
-                         ELSE COALESCE(cls.total_count, 0)
-                       END AS total_count
-                FROM attendance_session s
-                LEFT JOIN (""" + checkedInSql + ") rec ON rec.session_id = s.id\n" +
-                "LEFT JOIN (" + enrolledSql + ") exp ON exp.slot_id = s.experiment_course_slot_id\n" +
+        StringBuilder sql = new StringBuilder(
+                "SELECT s.id AS session_id,\n" +
+                "       s.teacher_id,\n" +
+                "       s.experiment_course_id,\n" +
+                "       CAST(s.started_at AS DATE) AS stat_day,\n" +
+                "       COALESCE(rec.checked_in_count, 0) AS checked_in_count,\n" +
+                "       CASE\n" +
+                "         WHEN s.source_type = 'EXPERIMENT_COURSE' THEN COALESCE(exp.total_count, 0)\n" +
+                "         ELSE COALESCE(cls.total_count, 0)\n" +
+                "       END AS total_count\n" +
+                "FROM attendance_session s\n" +
+                "LEFT JOIN (" + checkedInSql + ") rec ON rec.session_id = s.id\n" +
+                "LEFT JOIN (" + experimentRosterCountSql + ") exp ON exp.session_id = s.id\n" +
                 "LEFT JOIN (" + classRosterSql + ") cls ON cls.class_id = s.class_id\n" +
                 "WHERE s.started_at BETWEEN :fromTime AND :toTime");
         MapSqlParameterSource params = new MapSqlParameterSource()
@@ -967,22 +982,19 @@ public class StatisticsService {
             params.addValue("teacherId", teacherId);
         }
         if (classId != null) {
-            sql.append("""
-                     AND (
-                        (s.source_type = 'CLASS_SCHEDULE' AND s.class_id = :classId)
-                        OR (
-                           s.source_type = 'EXPERIMENT_COURSE'
-                           AND EXISTS (
-                               SELECT 1
-                               FROM experiment_course_enrollment e2
-                               JOIN sys_user su2 ON su2.id = e2.student_id
-                               WHERE e2.slot_id = s.experiment_course_slot_id
-                                 AND e2.status = 'ENROLLED'
-                                 AND su2.class_id = :classId
-                           )
-                        )
-                     )
-                    """);
+            sql.append(
+                    " AND (\n" +
+                    "    (s.source_type = 'CLASS_SCHEDULE' AND s.class_id = :classId)\n" +
+                    "    OR (\n" +
+                    "       s.source_type = 'EXPERIMENT_COURSE'\n" +
+                    "       AND EXISTS (\n" +
+                    "           SELECT 1\n" +
+                    "           FROM (" + experimentRosterSql + ") roster2\n" +
+                    "           WHERE roster2.session_id = s.id\n" +
+                    "             AND roster2.class_id = :classId\n" +
+                    "       )\n" +
+                    "    )\n" +
+                    " )");
             params.addValue("classId", classId);
         }
         return jdbcTemplate.queryForList(sql.toString(), params).stream()
@@ -998,61 +1010,69 @@ public class StatisticsService {
     }
 
     private List<SessionClassAggregateRow> loadAttendanceClassAggregates(Long teacherId, Long classId, ResolvedFilters filters) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT base.session_id,
-                       base.teacher_id,
-                       base.class_id,
-                       base.stat_day,
-                       base.checked_in_count,
-                       base.total_count
-                FROM (
-                    SELECT s.id AS session_id,
-                           s.teacher_id,
-                           s.class_id,
-                           CAST(s.started_at AS DATE) AS stat_day,
-                           COALESCE(rec.checked_in_count, 0) AS checked_in_count,
-                           COALESCE(cls.total_count, 0) AS total_count
-                    FROM attendance_session s
-                    LEFT JOIN (
-                        SELECT ar.session_id, COUNT(DISTINCT ar.student_id) AS checked_in_count
-                        FROM attendance_record ar
-                        GROUP BY ar.session_id
-                    ) rec ON rec.session_id = s.id
-                    LEFT JOIN (
-                        SELECT su.class_id, COUNT(*) AS total_count
-                        FROM sys_user su
-                        JOIN sys_user_role ur ON ur.user_id = su.id
-                        JOIN sys_role sr ON sr.id = ur.role_id
-                        WHERE su.enabled = TRUE
-                          AND su.class_id IS NOT NULL
-                          AND sr.code = 'ROLE_STUDENT'
-                        GROUP BY su.class_id
-                    ) cls ON cls.class_id = s.class_id
-                    WHERE s.source_type = 'CLASS_SCHEDULE'
-                      AND s.started_at BETWEEN :fromTime AND :toTime
-
-                    UNION ALL
-
-                    SELECT s.id AS session_id,
-                           s.teacher_id,
-                           su.class_id,
-                           CAST(s.started_at AS DATE) AS stat_day,
-                           COUNT(DISTINCT ar.student_id) AS checked_in_count,
-                           COUNT(DISTINCT e.student_id) AS total_count
-                    FROM attendance_session s
-                    JOIN experiment_course_enrollment e
-                      ON e.slot_id = s.experiment_course_slot_id
-                     AND e.status = 'ENROLLED'
-                    JOIN sys_user su ON su.id = e.student_id
-                    LEFT JOIN attendance_record ar
-                      ON ar.session_id = s.id
-                     AND ar.student_id = e.student_id
-                    WHERE s.source_type = 'EXPERIMENT_COURSE'
-                      AND s.started_at BETWEEN :fromTime AND :toTime
-                    GROUP BY s.id, s.teacher_id, su.class_id, CAST(s.started_at AS DATE)
-                ) base
-                WHERE 1 = 1
-                """);
+        String experimentRosterSql = """
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN attendance_session_roster asr ON asr.session_id = ats.id
+                JOIN sys_user su ON su.id = asr.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                UNION ALL
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN experiment_course_enrollment e ON e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
+                JOIN sys_user su ON su.id = e.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                  AND NOT EXISTS (SELECT 1 FROM attendance_session_roster sr WHERE sr.session_id = ats.id)
+                """;
+        StringBuilder sql = new StringBuilder(
+                "SELECT base.session_id,\n" +
+                "       base.teacher_id,\n" +
+                "       base.class_id,\n" +
+                "       base.stat_day,\n" +
+                "       base.checked_in_count,\n" +
+                "       base.total_count\n" +
+                "FROM (\n" +
+                "    SELECT s.id AS session_id,\n" +
+                "           s.teacher_id,\n" +
+                "           s.class_id,\n" +
+                "           CAST(s.started_at AS DATE) AS stat_day,\n" +
+                "           COALESCE(rec.checked_in_count, 0) AS checked_in_count,\n" +
+                "           COALESCE(cls.total_count, 0) AS total_count\n" +
+                "    FROM attendance_session s\n" +
+                "    LEFT JOIN (\n" +
+                "        SELECT ar.session_id, COUNT(DISTINCT ar.student_id) AS checked_in_count\n" +
+                "        FROM attendance_record ar\n" +
+                "        GROUP BY ar.session_id\n" +
+                "    ) rec ON rec.session_id = s.id\n" +
+                "    LEFT JOIN (\n" +
+                "        SELECT su.class_id, COUNT(*) AS total_count\n" +
+                "        FROM sys_user su\n" +
+                "        JOIN sys_user_role ur ON ur.user_id = su.id\n" +
+                "        JOIN sys_role sr ON sr.id = ur.role_id\n" +
+                "        WHERE su.enabled = TRUE\n" +
+                "          AND su.class_id IS NOT NULL\n" +
+                "          AND sr.code = 'ROLE_STUDENT'\n" +
+                "        GROUP BY su.class_id\n" +
+                "    ) cls ON cls.class_id = s.class_id\n" +
+                "    WHERE s.source_type = 'CLASS_SCHEDULE'\n" +
+                "      AND s.started_at BETWEEN :fromTime AND :toTime\n" +
+                "    UNION ALL\n" +
+                "    SELECT s.id AS session_id,\n" +
+                "           s.teacher_id,\n" +
+                "           roster.class_id,\n" +
+                "           CAST(s.started_at AS DATE) AS stat_day,\n" +
+                "           COUNT(DISTINCT ar.student_id) AS checked_in_count,\n" +
+                "           COUNT(DISTINCT roster.student_id) AS total_count\n" +
+                "    FROM attendance_session s\n" +
+                "    JOIN (" + experimentRosterSql + ") roster ON roster.session_id = s.id\n" +
+                "    LEFT JOIN attendance_record ar\n" +
+                "      ON ar.session_id = s.id\n" +
+                "     AND ar.student_id = roster.student_id\n" +
+                "    WHERE s.source_type = 'EXPERIMENT_COURSE'\n" +
+                "      AND s.started_at BETWEEN :fromTime AND :toTime\n" +
+                "    GROUP BY s.id, s.teacher_id, roster.class_id, CAST(s.started_at AS DATE)\n" +
+                ") base\n" +
+                "WHERE 1 = 1");
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
                 .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));
@@ -1778,44 +1798,57 @@ public class StatisticsService {
     }
 
     private List<Map<String, Object>> loadCourseAttendanceDetails(Long teacherId, Long classId, ResolvedFilters filters) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT ec.id AS course_id,
-                       ec.title AS course_title,
-                       ec.teacher_id AS teacher_id,
-                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
-                       ecs.id AS slot_id,
-                       COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,
-                       ecsi.id AS instance_id,
-                       ecsi.display_name AS instance_name,
-                       ecsi.lesson_date,
-                       ts.name AS time_slot_name,
-                       lr.name AS lab_room_name,
-                       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,
-                       su.username AS student_username,
-                       CASE
-                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
-                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
-                         ELSE c.name
-                       END AS class_display_name,
-                       COALESCE(ar.status, 'NOT_CHECKED_IN') AS attendance_status,
-                       ar.method AS attendance_method,
-                       ar.checked_in_at
+        String experimentRosterSql = """
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
                 FROM attendance_session ats
-                JOIN experiment_course ec ON ec.id = ats.experiment_course_id
-                JOIN sys_user teacher ON teacher.id = ec.teacher_id
-                JOIN experiment_course_slot ecs ON ecs.id = ats.experiment_course_slot_id
-                JOIN experiment_course_slot_instance ecsi ON ecsi.id = ats.experiment_course_instance_id
+                JOIN attendance_session_roster asr ON asr.session_id = ats.id
+                JOIN sys_user su ON su.id = asr.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                UNION ALL
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
                 JOIN experiment_course_enrollment e ON e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
                 JOIN sys_user su ON su.id = e.student_id
-                LEFT JOIN attendance_record ar ON ar.session_id = ats.id AND ar.student_id = su.id
-                LEFT JOIN org_class c ON c.id = su.class_id
-                LEFT JOIN org_department d ON d.id = c.department_id
-                LEFT JOIN time_slot ts ON ts.id = ecsi.slot_id
-                LEFT JOIN lab_room lr ON lr.id = ecsi.lab_room_id
                 WHERE ats.source_type = 'EXPERIMENT_COURSE'
-                  AND ec.semester_id = :semesterId
-                  AND ats.started_at BETWEEN :fromTime AND :toTime
-                """);
+                  AND NOT EXISTS (SELECT 1 FROM attendance_session_roster sr WHERE sr.session_id = ats.id)
+                """;
+        StringBuilder sql = new StringBuilder(
+                "SELECT ec.id AS course_id,\n" +
+                "       ec.title AS course_title,\n" +
+                "       ec.teacher_id AS teacher_id,\n" +
+                "       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,\n" +
+                "       ecs.id AS slot_id,\n" +
+                "       COALESCE(NULLIF(TRIM(ecs.name), ''), CONCAT('场次', ecs.id)) AS slot_name,\n" +
+                "       ecsi.id AS instance_id,\n" +
+                "       ecsi.display_name AS instance_name,\n" +
+                "       ecsi.lesson_date,\n" +
+                "       ts.name AS time_slot_name,\n" +
+                "       lr.name AS lab_room_name,\n" +
+                "       COALESCE(NULLIF(TRIM(su.display_name), ''), su.username) AS student_display_name,\n" +
+                "       su.username AS student_username,\n" +
+                "       CASE\n" +
+                "         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)\n" +
+                "         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)\n" +
+                "         ELSE c.name\n" +
+                "       END AS class_display_name,\n" +
+                "       COALESCE(ar.status, 'NOT_CHECKED_IN') AS attendance_status,\n" +
+                "       ar.method AS attendance_method,\n" +
+                "       ar.checked_in_at\n" +
+                "FROM attendance_session ats\n" +
+                "JOIN experiment_course ec ON ec.id = ats.experiment_course_id\n" +
+                "JOIN sys_user teacher ON teacher.id = ec.teacher_id\n" +
+                "JOIN experiment_course_slot ecs ON ecs.id = ats.experiment_course_slot_id\n" +
+                "JOIN experiment_course_slot_instance ecsi ON ecsi.id = ats.experiment_course_instance_id\n" +
+                "JOIN (" + experimentRosterSql + ") roster ON roster.session_id = ats.id\n" +
+                "JOIN sys_user su ON su.id = roster.student_id\n" +
+                "LEFT JOIN attendance_record ar ON ar.session_id = ats.id AND ar.student_id = su.id\n" +
+                "LEFT JOIN org_class c ON c.id = su.class_id\n" +
+                "LEFT JOIN org_department d ON d.id = c.department_id\n" +
+                "LEFT JOIN time_slot ts ON ts.id = ecsi.slot_id\n" +
+                "LEFT JOIN lab_room lr ON lr.id = ecsi.lab_room_id\n" +
+                "WHERE ats.source_type = 'EXPERIMENT_COURSE'\n" +
+                "  AND ec.semester_id = :semesterId\n" +
+                "  AND ats.started_at BETWEEN :fromTime AND :toTime");
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("semesterId", filters.semester().getId())
                 .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
@@ -1914,7 +1947,7 @@ public class StatisticsService {
         if (classId != null) {
             sql.append("""
                      AND (
-                        EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id AND tc.class_id = :classId)
+                        (t.experiment_course_id IS NULL AND EXISTS (SELECT 1 FROM exp_task_target_class tc WHERE tc.task_id = t.id AND tc.class_id = :classId))
                         OR EXISTS (
                            SELECT 1 FROM report_submission rs
                            JOIN sys_user su ON su.id = rs.student_id
@@ -1936,52 +1969,62 @@ public class StatisticsService {
     }
 
     private List<Map<String, Object>> loadAdminAttendanceDetails(Long teacherId, Long classId, ResolvedFilters filters) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT s.teacher_id,
-                       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,
-                       su.class_id AS class_id,
-                       CASE
-                         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)
-                         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)
-                         ELSE c.name
-                       END AS class_display_name,
-                       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ec.title ELSE cs.course_name END AS course_name,
-                       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.lesson_date ELSE cs.lesson_date END AS lesson_date,
-                       COALESCE(exp_room.name, class_room.name) AS lab_room_name,
-                       s.id AS session_id,
-                       COUNT(DISTINCT ar.student_id) AS checked_in_count,
-                       COUNT(DISTINCT roster.student_id) AS total_count,
-                       CASE
-                         WHEN COUNT(DISTINCT roster.student_id) = 0 THEN 0
-                         ELSE COUNT(DISTINCT ar.student_id) * 1.0 / COUNT(DISTINCT roster.student_id)
-                       END AS attendance_rate
-                FROM attendance_session s
-                JOIN sys_user teacher ON teacher.id = s.teacher_id
-                LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'
-                LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id
-                LEFT JOIN experiment_course ec ON ec.id = s.experiment_course_id AND s.source_type = 'EXPERIMENT_COURSE'
-                LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'
-                LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id
-                LEFT JOIN (
-                    SELECT ats.id AS session_id, su.id AS student_id, su.class_id
-                    FROM attendance_session ats
-                    JOIN sys_user su ON ats.source_type = 'CLASS_SCHEDULE' AND su.class_id = ats.class_id
-                    JOIN sys_user_role ur ON ur.user_id = su.id
-                    JOIN sys_role sr ON sr.id = ur.role_id AND sr.code = 'ROLE_STUDENT'
-                    WHERE su.enabled = TRUE
-                    UNION ALL
-                    SELECT ats.id AS session_id, su.id AS student_id, su.class_id
-                    FROM attendance_session ats
-                    JOIN experiment_course_enrollment e ON ats.source_type = 'EXPERIMENT_COURSE'
-                        AND e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
-                    JOIN sys_user su ON su.id = e.student_id
-                ) roster ON roster.session_id = s.id
-                LEFT JOIN sys_user su ON su.id = roster.student_id
-                LEFT JOIN org_class c ON c.id = su.class_id
-                LEFT JOIN org_department d ON d.id = c.department_id
-                LEFT JOIN attendance_record ar ON ar.session_id = s.id AND ar.student_id = roster.student_id
-                WHERE s.started_at BETWEEN :fromTime AND :toTime
-                """);
+        String experimentRosterSql = """
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN attendance_session_roster asr ON asr.session_id = ats.id
+                JOIN sys_user su ON su.id = asr.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                UNION ALL
+                SELECT ats.id AS session_id, su.id AS student_id, su.class_id
+                FROM attendance_session ats
+                JOIN experiment_course_enrollment e ON e.slot_id = ats.experiment_course_slot_id AND e.status = 'ENROLLED'
+                JOIN sys_user su ON su.id = e.student_id
+                WHERE ats.source_type = 'EXPERIMENT_COURSE'
+                  AND NOT EXISTS (SELECT 1 FROM attendance_session_roster sr WHERE sr.session_id = ats.id)
+                """;
+        StringBuilder sql = new StringBuilder(
+                "SELECT s.teacher_id,\n" +
+                "       COALESCE(NULLIF(TRIM(teacher.display_name), ''), teacher.username) AS teacher_name,\n" +
+                "       su.class_id AS class_id,\n" +
+                "       CASE\n" +
+                "         WHEN d.name IS NOT NULL AND c.grade IS NOT NULL THEN CONCAT(d.name, ' / ', c.grade, '级', c.name)\n" +
+                "         WHEN c.grade IS NOT NULL THEN CONCAT(c.grade, '级', c.name)\n" +
+                "         ELSE c.name\n" +
+                "       END AS class_display_name,\n" +
+                "       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ec.title ELSE cs.course_name END AS course_name,\n" +
+                "       CASE WHEN s.source_type = 'EXPERIMENT_COURSE' THEN ecsi.lesson_date ELSE cs.lesson_date END AS lesson_date,\n" +
+                "       COALESCE(exp_room.name, class_room.name) AS lab_room_name,\n" +
+                "       s.id AS session_id,\n" +
+                "       COUNT(DISTINCT ar.student_id) AS checked_in_count,\n" +
+                "       COUNT(DISTINCT roster.student_id) AS total_count,\n" +
+                "       CASE\n" +
+                "         WHEN COUNT(DISTINCT roster.student_id) = 0 THEN 0\n" +
+                "         ELSE COUNT(DISTINCT ar.student_id) * 1.0 / COUNT(DISTINCT roster.student_id)\n" +
+                "       END AS attendance_rate\n" +
+                "FROM attendance_session s\n" +
+                "JOIN sys_user teacher ON teacher.id = s.teacher_id\n" +
+                "LEFT JOIN course_schedule cs ON cs.id = s.schedule_id AND s.source_type = 'CLASS_SCHEDULE'\n" +
+                "LEFT JOIN lab_room class_room ON class_room.id = cs.lab_room_id\n" +
+                "LEFT JOIN experiment_course ec ON ec.id = s.experiment_course_id AND s.source_type = 'EXPERIMENT_COURSE'\n" +
+                "LEFT JOIN experiment_course_slot_instance ecsi ON ecsi.id = s.experiment_course_instance_id AND s.source_type = 'EXPERIMENT_COURSE'\n" +
+                "LEFT JOIN lab_room exp_room ON exp_room.id = ecsi.lab_room_id\n" +
+                "LEFT JOIN (\n" +
+                "    SELECT ats.id AS session_id, su.id AS student_id, su.class_id\n" +
+                "    FROM attendance_session ats\n" +
+                "    JOIN sys_user su ON ats.source_type = 'CLASS_SCHEDULE' AND su.class_id = ats.class_id\n" +
+                "    JOIN sys_user_role ur ON ur.user_id = su.id\n" +
+                "    JOIN sys_role sr ON sr.id = ur.role_id AND sr.code = 'ROLE_STUDENT'\n" +
+                "    WHERE su.enabled = TRUE\n" +
+                "    UNION ALL\n" +
+                "    SELECT exp_roster.session_id, exp_roster.student_id, exp_roster.class_id\n" +
+                "    FROM (" + experimentRosterSql + ") exp_roster\n" +
+                ") roster ON roster.session_id = s.id\n" +
+                "LEFT JOIN sys_user su ON su.id = roster.student_id\n" +
+                "LEFT JOIN org_class c ON c.id = su.class_id\n" +
+                "LEFT JOIN org_department d ON d.id = c.department_id\n" +
+                "LEFT JOIN attendance_record ar ON ar.session_id = s.id AND ar.student_id = roster.student_id\n" +
+                "WHERE s.started_at BETWEEN :fromTime AND :toTime");
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("fromTime", Timestamp.valueOf(filters.from().atStartOfDay()))
                 .addValue("toTime", Timestamp.valueOf(filters.to().atTime(LocalTime.MAX)));

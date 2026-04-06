@@ -6,9 +6,12 @@ import cn.edu.jnu.labflowreport.attendance.dto.AttendanceSessionCreateRequest;
 import cn.edu.jnu.labflowreport.attendance.dto.AttendanceTokenTtlUpdateRequest;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceRecordEntity;
 import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionEntity;
+import cn.edu.jnu.labflowreport.attendance.entity.AttendanceSessionRosterEntity;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceRecordMapper;
+import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceSessionRosterMapper;
 import cn.edu.jnu.labflowreport.attendance.mapper.AttendanceSessionMapper;
 import cn.edu.jnu.labflowreport.attendance.vo.AttendanceRecordVO;
+import cn.edu.jnu.labflowreport.attendance.vo.AttendanceSessionRosterRow;
 import cn.edu.jnu.labflowreport.attendance.vo.AttendanceSessionVO;
 import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceSessionDetailVO;
 import cn.edu.jnu.labflowreport.attendance.vo.TeacherAttendanceSessionListItemVO;
@@ -52,6 +55,7 @@ public class AttendanceService {
     private static final String SOURCE_EXPERIMENT_COURSE = "EXPERIMENT_COURSE";
 
     private final AttendanceSessionMapper sessionMapper;
+    private final AttendanceSessionRosterMapper sessionRosterMapper;
     private final AttendanceRecordMapper recordMapper;
     private final AttendanceTokenService tokenService;
     private final CourseScheduleMapper courseScheduleMapper;
@@ -66,6 +70,7 @@ public class AttendanceService {
 
     public AttendanceService(
             AttendanceSessionMapper sessionMapper,
+            AttendanceSessionRosterMapper sessionRosterMapper,
             AttendanceRecordMapper recordMapper,
             AttendanceTokenService tokenService,
             CourseScheduleMapper courseScheduleMapper,
@@ -78,6 +83,7 @@ public class AttendanceService {
             @Value("${ATT_TOKEN_TTL_SECONDS:6}") int defaultTokenTtlSeconds
     ) {
         this.sessionMapper = sessionMapper;
+        this.sessionRosterMapper = sessionRosterMapper;
         this.recordMapper = recordMapper;
         this.tokenService = tokenService;
         this.courseScheduleMapper = courseScheduleMapper;
@@ -170,10 +176,12 @@ public class AttendanceService {
         }
 
         if (existing != null) {
+            ensureExperimentCourseRosterSnapshot(existing);
             return toVo(existing);
         }
 
         sessionMapper.insert(entity);
+        ensureExperimentCourseRosterSnapshot(entity);
         AttendanceSessionVO vo = toVo(entity);
         vo.setId(entity.getId());
         return vo;
@@ -591,7 +599,12 @@ public class AttendanceService {
 
     private void ensureStudentMatchesSession(Long studentId, SysUserEntity user, AttendanceSessionEntity session, String suffix) {
         if (SOURCE_EXPERIMENT_COURSE.equalsIgnoreCase(session.getSourceType())) {
-            if (session.getExperimentCourseSlotId() == null || nvl(experimentCourseEnrollmentMapper.countActiveBySlotAndStudent(session.getExperimentCourseSlotId(), studentId)) <= 0) {
+            long snapshotSize = sessionRosterMapper.countBySessionId(session.getId());
+            boolean matched = snapshotSize > 0
+                    ? nvl(sessionRosterMapper.countBySessionAndStudent(session.getId(), studentId)) > 0
+                    : session.getExperimentCourseSlotId() != null
+                        && nvl(experimentCourseEnrollmentMapper.countActiveBySlotAndStudent(session.getExperimentCourseSlotId(), studentId)) > 0;
+            if (!matched) {
                 throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "不属于该实验课程场次名单，" + suffix);
             }
             return;
@@ -602,16 +615,45 @@ public class AttendanceService {
     }
 
     private List<SysUserEntity> loadRosterUsers(AttendanceSessionEntity session) {
+        return loadRosterRows(session).stream()
+                .map(row -> {
+                    SysUserEntity user = new SysUserEntity();
+                    user.setId(row.studentId());
+                    user.setUsername(row.studentUsername());
+                    user.setDisplayName(row.studentDisplayName());
+                    user.setClassId(row.classId());
+                    return user;
+                })
+                .toList();
+    }
+
+    private List<AttendanceSessionRosterRow> loadRosterRows(AttendanceSessionEntity session) {
         if (SOURCE_EXPERIMENT_COURSE.equalsIgnoreCase(session.getSourceType())) {
+            List<AttendanceSessionRosterRow> snapshotRows = sessionRosterMapper.findRowsBySessionId(session.getId());
+            if (!snapshotRows.isEmpty()) {
+                return snapshotRows;
+            }
             if (session.getExperimentCourseSlotId() == null) {
                 return List.of();
             }
-            return experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(session.getExperimentCourseSlotId());
+            return experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(session.getExperimentCourseSlotId()).stream()
+                    .map(user -> new AttendanceSessionRosterRow(
+                            user.getId(),
+                            user.getUsername(),
+                            user.getDisplayName(),
+                            user.getClassId()))
+                    .toList();
         }
         if (session.getClassId() == null) {
             return List.of();
         }
-        return sysUserMapper.findStudentsByClassId(session.getClassId());
+        return sysUserMapper.findStudentsByClassId(session.getClassId()).stream()
+                .map(user -> new AttendanceSessionRosterRow(
+                        user.getId(),
+                        user.getUsername(),
+                        user.getDisplayName(),
+                        user.getClassId()))
+                .toList();
     }
 
     private String csvCell(Object value) {
@@ -621,7 +663,7 @@ public class AttendanceService {
     }
 
     private List<TeacherAttendanceStudentStatusVO> buildRosterStatuses(Long sessionId, AttendanceSessionEntity session) {
-        List<SysUserEntity> roster = loadRosterUsers(session);
+        List<AttendanceSessionRosterRow> roster = loadRosterRows(session);
         List<AttendanceRecordVO> records = recordMapper.findRecordsBySessionId(sessionId);
         Map<Long, AttendanceRecordVO> recordByStudentId = new HashMap<>();
         for (AttendanceRecordVO record : records) {
@@ -632,13 +674,13 @@ public class AttendanceService {
 
         List<TeacherAttendanceStudentStatusVO> result = new ArrayList<>();
         Set<Long> rosterIds = new HashSet<>();
-        for (SysUserEntity user : roster) {
-            rosterIds.add(user.getId());
-            AttendanceRecordVO record = recordByStudentId.get(user.getId());
+        for (AttendanceSessionRosterRow user : roster) {
+            rosterIds.add(user.studentId());
+            AttendanceRecordVO record = recordByStudentId.get(user.studentId());
             result.add(new TeacherAttendanceStudentStatusVO(
-                    user.getId(),
-                    user.getUsername(),
-                    user.getDisplayName(),
+                    user.studentId(),
+                    user.studentUsername(),
+                    user.studentDisplayName(),
                     record == null ? "NOT_CHECKED_IN" : "CHECKED_IN",
                     record == null ? null : record.getMethod(),
                     record == null ? null : record.getCheckedInAt()
@@ -716,6 +758,27 @@ public class AttendanceService {
 
     private int nvl(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private void ensureExperimentCourseRosterSnapshot(AttendanceSessionEntity session) {
+        if (!SOURCE_EXPERIMENT_COURSE.equalsIgnoreCase(session.getSourceType()) || session.getId() == null) {
+            return;
+        }
+        if (sessionRosterMapper.countBySessionId(session.getId()) > 0) {
+            return;
+        }
+        if (session.getExperimentCourseSlotId() == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (SysUserEntity student : experimentCourseEnrollmentMapper.findActiveStudentsBySlotId(session.getExperimentCourseSlotId())) {
+            AttendanceSessionRosterEntity entity = new AttendanceSessionRosterEntity();
+            entity.setSessionId(session.getId());
+            entity.setStudentId(student.getId());
+            entity.setClassId(student.getClassId());
+            entity.setCreatedAt(now);
+            sessionRosterMapper.insert(entity);
+        }
     }
 
     public record CheckinResult(Long recordId, boolean alreadyCheckedIn, LocalDateTime checkedInAt) {
