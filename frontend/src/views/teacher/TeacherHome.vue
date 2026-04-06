@@ -10,6 +10,7 @@ import QRCode from 'qrcode'
 import PlagiarismSummaryPanel from './components/PlagiarismSummaryPanel.vue'
 import LabRoomManager from '../common/LabRoomManager.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
+import TaskDiscussionPanel from '../common/TaskDiscussionPanel.vue'
 
 type TaskVO = {
   id: number
@@ -316,6 +317,21 @@ type TaskDeviceRequestVO = {
   checkoutAt?: string | null
   returnAt?: string | null
 }
+type TeacherDiscussionAggregateItemVO = {
+  threadId: number
+  taskId: number
+  taskTitle: string
+  studentId: number
+  studentUsername: string
+  studentDisplayName: string
+  latestMessagePreview?: string | null
+  latestTeacherReplyPreview?: string | null
+  latestMessageAt?: string | null
+  unreadCount: number
+}
+type UnreadCountVO = {
+  unreadCount: number
+}
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -323,7 +339,7 @@ const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
 
-const activeTab = ref<'course' | 'labroom' | 'flow' | 'report' | 'schedule' | 'history' | 'stats'>('course')
+const activeTab = ref<'course' | 'labroom' | 'discussion' | 'flow' | 'report' | 'schedule' | 'history' | 'stats'>('course')
 const flowSubTab = ref<'progress' | 'device'>('progress')
 
 const tasks = ref<TaskVO[]>([])
@@ -436,6 +452,14 @@ const loadingDeviceRequests = ref(false)
 const deviceRequestQ = ref('')
 const deviceRequestStatus = ref('')
 const actioningRequestId = ref<number | null>(null)
+const teacherDiscussionItems = ref<TeacherDiscussionAggregateItemVO[]>([])
+const teacherDiscussionLoading = ref(false)
+const teacherDiscussionQ = ref('')
+const teacherDiscussionUnreadOnly = ref(false)
+const teacherDiscussionUnreadCount = ref(0)
+const highlightedDiscussionThreadId = ref<number | null>(null)
+let teacherDiscussionUnreadTimer: number | null = null
+let teacherDiscussionListTimer: number | null = null
 
 // Schedule/attendance state
 const semesters = ref<Semester[]>([])
@@ -758,6 +782,9 @@ async function loadTasks() {
 async function selectTask(taskId: number) {
   selectedTaskId.value = taskId
   await loadTaskDetail(taskId)
+  if (activeTab.value === 'discussion') {
+    return
+  }
   if (activeTab.value === 'report') {
     await loadSubmissions()
     return
@@ -785,6 +812,68 @@ async function loadSubmissions() {
   } finally {
     loadingSubs.value = false
   }
+}
+
+async function loadTeacherDiscussionUnreadSummary() {
+  try {
+    const summary = await apiData<UnreadCountVO>('/api/teacher/discussions/unread-summary', { method: 'GET' }, auth.token)
+    teacherDiscussionUnreadCount.value = summary.unreadCount || 0
+  } catch {
+    teacherDiscussionUnreadCount.value = 0
+  }
+}
+
+async function loadTeacherDiscussions() {
+  teacherDiscussionLoading.value = true
+  try {
+    const params = new URLSearchParams()
+    const keyword = teacherDiscussionQ.value.trim()
+    if (keyword) params.set('q', keyword)
+    if (teacherDiscussionUnreadOnly.value) params.set('unreadOnly', 'true')
+    const query = params.toString() ? `?${params.toString()}` : ''
+    teacherDiscussionItems.value = await apiData<TeacherDiscussionAggregateItemVO[]>(
+      `/api/teacher/discussions${query}`,
+      { method: 'GET' },
+      auth.token,
+    )
+  } catch (e: any) {
+    teacherDiscussionItems.value = []
+    ElMessage.error(e?.message ?? '加载讨论聚合失败')
+  } finally {
+    teacherDiscussionLoading.value = false
+  }
+}
+
+async function openTeacherDiscussionItem(item: TeacherDiscussionAggregateItemVO) {
+  activeTab.value = 'discussion'
+  highlightedDiscussionThreadId.value = item.threadId
+  if (selectedTaskId.value !== item.taskId) {
+    await selectTask(item.taskId)
+  }
+  await handleDiscussionChanged()
+}
+
+async function handleDiscussionChanged() {
+  await Promise.all([loadTeacherDiscussionUnreadSummary(), loadTeacherDiscussions()])
+}
+
+function startTeacherDiscussionPolling() {
+  stopTeacherDiscussionPolling()
+  teacherDiscussionUnreadTimer = window.setInterval(() => {
+    loadTeacherDiscussionUnreadSummary()
+  }, 16000)
+  teacherDiscussionListTimer = window.setInterval(() => {
+    if (activeTab.value === 'discussion') {
+      loadTeacherDiscussions()
+    }
+  }, 16000)
+}
+
+function stopTeacherDiscussionPolling() {
+  if (teacherDiscussionUnreadTimer) window.clearInterval(teacherDiscussionUnreadTimer)
+  if (teacherDiscussionListTimer) window.clearInterval(teacherDiscussionListTimer)
+  teacherDiscussionUnreadTimer = null
+  teacherDiscussionListTimer = null
 }
 
 async function loadProgressStudents() {
@@ -2093,6 +2182,8 @@ async function updateTaskTitle() {
 onMounted(async () => {
   await loadTasks()
   await loadExperimentCourses()
+  await loadTeacherDiscussionUnreadSummary()
+  startTeacherDiscussionPolling()
 })
 
 watch(activeTab, async (tab) => {
@@ -2115,6 +2206,10 @@ watch(activeTab, async (tab) => {
     }
     return
   }
+  if (tab === 'discussion') {
+    await Promise.all([loadTeacherDiscussionUnreadSummary(), loadTeacherDiscussions()])
+    return
+  }
   if (tab === 'schedule') {
     try {
       await ensureScheduleMeta()
@@ -2133,6 +2228,7 @@ watch(activeTab, async (tab) => {
 
 onBeforeUnmount(() => {
   stopLoops()
+  stopTeacherDiscussionPolling()
   revokeProgressImageUrls()
 })
 
@@ -2584,7 +2680,7 @@ async function copyLink() {
       </div>
     </el-header>
     <el-container>
-      <el-aside v-if="(activeTab === 'report' || activeTab === 'flow') && !isMobile" width="360px" class="aside">
+      <el-aside v-if="(activeTab === 'report' || activeTab === 'flow' || activeTab === 'discussion') && !isMobile" width="360px" class="aside">
         <div class="aside-title">任务列表</div>
         <el-table
           :data="tasks"
@@ -2877,6 +2973,93 @@ async function copyLink() {
               </div>
             </div>
             <LabRoomManager api-base="/api/teacher/lab-rooms" />
+          </el-tab-pane>
+
+          <el-tab-pane name="discussion">
+            <template #label>
+              <el-badge :value="teacherDiscussionUnreadCount" :hidden="teacherDiscussionUnreadCount <= 0" :max="99">
+                <span>讨论区</span>
+              </el-badge>
+            </template>
+
+            <el-card v-if="isMobile" class="block" shadow="never">
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                <el-select
+                  v-model="selectedTaskId"
+                  placeholder="选择任务"
+                  style="width: 260px"
+                  :loading="loadingTasks"
+                  clearable
+                  @change="(id: any) => id && selectTask(Number(id))"
+                >
+                  <el-option v-for="t in tasks" :key="t.id" :label="t.title" :value="t.id" />
+                </el-select>
+                <el-button size="small" :loading="loadingTasks" @click="loadTasks">刷新任务</el-button>
+              </div>
+            </el-card>
+
+            <el-card class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>向老师提问聚合</div>
+                </div>
+              </template>
+              <div class="toolbar">
+                <el-input v-model="teacherDiscussionQ" clearable placeholder="搜索任务名/学生/内容摘要" style="width: 280px" />
+                <el-switch v-model="teacherDiscussionUnreadOnly" active-text="仅看未读" />
+                <el-button type="primary" :loading="teacherDiscussionLoading" @click="loadTeacherDiscussions">查询</el-button>
+                <el-button :loading="teacherDiscussionLoading" @click="handleDiscussionChanged">刷新</el-button>
+              </div>
+              <template v-if="!isMobile">
+                <el-table :data="teacherDiscussionItems" size="small" v-loading="teacherDiscussionLoading" empty-text="暂无提问" @row-click="(row: TeacherDiscussionAggregateItemVO) => openTeacherDiscussionItem(row)">
+                  <el-table-column prop="taskTitle" label="任务" min-width="180" />
+                  <el-table-column label="学生" min-width="180">
+                    <template #default="{ row }: { row: TeacherDiscussionAggregateItemVO }">
+                      <div>{{ row.studentDisplayName }}</div>
+                      <div class="meta">{{ row.studentUsername }}</div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="latestMessagePreview" label="最新摘要" min-width="260" />
+                  <el-table-column prop="latestMessageAt" label="最新时间" min-width="180" />
+                  <el-table-column label="未读" width="90">
+                    <template #default="{ row }: { row: TeacherDiscussionAggregateItemVO }">
+                      <el-badge :value="row.unreadCount" :hidden="row.unreadCount <= 0" :max="99" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+              <template v-else>
+                <div v-if="teacherDiscussionLoading" class="meta">加载中...</div>
+                <div v-else-if="teacherDiscussionItems.length === 0" class="meta">暂无提问</div>
+                <el-card v-else v-for="item in teacherDiscussionItems" :key="item.threadId" shadow="never" class="stuCard" @click="openTeacherDiscussionItem(item)">
+                  <div class="stuHead">
+                    <div>
+                      <div class="stuName">{{ item.taskTitle }}</div>
+                      <div class="meta">{{ item.studentDisplayName }} / {{ item.studentUsername }}</div>
+                    </div>
+                    <el-badge :value="item.unreadCount" :hidden="item.unreadCount <= 0" :max="99" />
+                  </div>
+                  <div class="meta" style="margin-top: 8px">{{ item.latestMessageAt || '-' }}</div>
+                  <div style="margin-top: 8px; white-space: pre-wrap; word-break: break-word">{{ item.latestTeacherReplyPreview || item.latestMessagePreview || '暂无摘要' }}</div>
+                </el-card>
+              </template>
+            </el-card>
+
+            <el-card v-if="selectedTaskId && taskDetail" class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>{{ taskDetail.title }}</div>
+                  <div class="meta">任务讨论区</div>
+                </div>
+              </template>
+              <TaskDiscussionPanel
+                :task-id="selectedTaskId"
+                mode="teacher"
+                :highlight-thread-id="highlightedDiscussionThreadId"
+                :polling-enabled="activeTab === 'discussion'"
+                @changed="handleDiscussionChanged"
+              />
+            </el-card>
           </el-tab-pane>
 
           <el-tab-pane label="统计报表" name="stats">

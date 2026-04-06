@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiData, downloadBlob, fetchBlob, uploadFormData } from '../../api/http'
 import { useAuthStore } from '../../stores/auth'
 import UiModeToggle from '../common/UiModeToggle.vue'
 import { useUiStore } from '../../stores/ui'
+import TaskDiscussionPanel from '../common/TaskDiscussionPanel.vue'
 
 type TaskVO = {
   id: number
@@ -75,6 +76,16 @@ type TaskCompletionVO = {
   confirmedAt?: string | null
   confirmedBy?: number | null
   confirmedByDisplayName?: string | null
+}
+
+type TaskDiscussionUnreadItemVO = {
+  taskId: number
+  unreadCount: number
+}
+
+type StudentDiscussionUnreadSummaryVO = {
+  totalUnreadCount: number
+  items: TaskDiscussionUnreadItemVO[]
 }
 
 type TaskDeviceConfigVO = {
@@ -195,8 +206,8 @@ const ui = useUiStore()
 const router = useRouter()
 
 const isMobile = computed(() => ui.effectiveMode === 'mobile')
-const activeTab = ref<'tasks' | 'courses' | 'schedule'>('tasks')
-const mobilePage = ref<'list' | 'task' | 'courses' | 'schedule'>('list')
+const activeTab = ref<'tasks' | 'discussion' | 'courses' | 'schedule'>('tasks')
+const mobilePage = ref<'list' | 'task' | 'discussion' | 'courses' | 'schedule'>('list')
 
 const tasks = ref<TaskVO[]>([])
 const loadingTasks = ref(false)
@@ -263,6 +274,10 @@ const availableCourses = ref<StudentExperimentCourseVO[]>([])
 const myCourses = ref<StudentExperimentCourseVO[]>([])
 const loadingCourses = ref(false)
 const enrollingCourseId = ref<number | null>(null)
+const discussionUnreadByTaskId = ref<Record<number, number>>({})
+const discussionUnreadTotal = ref(0)
+let discussionUnreadTimer: number | null = null
+let discussionPageUnreadTimer: number | null = null
 const scheduleSemesterId = ref<number | null>(null)
 const weekStartDate = ref(getWeekStartYmd(new Date()))
 const weekItems = ref<WeekScheduleItem[]>([])
@@ -368,6 +383,63 @@ function completionSourceText(source?: TaskCompletionVO['completionSource']) {
   if (source === 'TEACHER_DIRECT') return '教师直接登记完成'
   if (source === 'STUDENT_REQUEST') return '学生申请完成'
   return '未登记'
+}
+
+function taskDiscussionUnreadCount(taskId: number) {
+  return discussionUnreadByTaskId.value[taskId] ?? 0
+}
+
+async function loadDiscussionUnreadSummary() {
+  try {
+    const summary = await apiData<StudentDiscussionUnreadSummaryVO>(
+      '/api/tasks/discussion/unread-summary',
+      { method: 'GET' },
+      auth.token,
+    )
+    const nextMap: Record<number, number> = {}
+    for (const item of summary.items || []) {
+      nextMap[item.taskId] = item.unreadCount
+    }
+    discussionUnreadByTaskId.value = nextMap
+    discussionUnreadTotal.value = summary.totalUnreadCount ?? 0
+  } catch {
+    discussionUnreadByTaskId.value = {}
+    discussionUnreadTotal.value = 0
+  }
+}
+
+function startDiscussionUnreadPolling() {
+  stopDiscussionUnreadPolling()
+  discussionUnreadTimer = window.setInterval(() => {
+    if (isDiscussionPageOpen()) return
+    loadDiscussionUnreadSummary()
+  }, 30000)
+}
+
+function stopDiscussionUnreadPolling() {
+  if (discussionUnreadTimer) {
+    window.clearInterval(discussionUnreadTimer)
+  }
+  discussionUnreadTimer = null
+}
+
+function isDiscussionPageOpen() {
+  return activeTab.value === 'discussion' || mobilePage.value === 'discussion'
+}
+
+function stopDiscussionPageUnreadPolling() {
+  if (discussionPageUnreadTimer) {
+    window.clearInterval(discussionPageUnreadTimer)
+  }
+  discussionPageUnreadTimer = null
+}
+
+function startDiscussionPageUnreadPolling() {
+  stopDiscussionPageUnreadPolling()
+  if (!isDiscussionPageOpen()) return
+  discussionPageUnreadTimer = window.setInterval(() => {
+    loadDiscussionUnreadSummary()
+  }, 16000)
 }
 
 async function loadTasks() {
@@ -479,6 +551,20 @@ async function openTaskMobile(taskId: number) {
   mobilePage.value = 'task'
 }
 
+async function openDiscussionTab() {
+  if (!selectedTaskId.value && tasks.value.length > 0) {
+    await selectTask(tasks.value[0]!.id)
+  }
+  activeTab.value = 'discussion'
+  await loadDiscussionUnreadSummary()
+}
+
+async function openDiscussionMobile() {
+  if (!selectedTaskId.value) return
+  mobilePage.value = 'discussion'
+  await loadDiscussionUnreadSummary()
+}
+
 async function openScheduleMobile() {
   mobilePage.value = 'schedule'
   if (!semesters.value.length || !timeSlots.value.length) {
@@ -502,6 +588,10 @@ function backToListMobile() {
   completionInfo.value = null
   taskDevices.value = []
   deviceRequests.value = []
+}
+
+function backToTaskMobile() {
+  mobilePage.value = 'task'
 }
 
 async function loadMySubmissions() {
@@ -1022,8 +1112,18 @@ watch(
   async (tab) => {
     if (tab === 'courses') {
       await loadExperimentCourses()
+      stopDiscussionPageUnreadPolling()
       return
     }
+    if (tab === 'discussion') {
+      if (!selectedTaskId.value && tasks.value.length > 0) {
+        await selectTask(tasks.value[0]!.id)
+      }
+      await loadDiscussionUnreadSummary()
+      startDiscussionPageUnreadPolling()
+      return
+    }
+    stopDiscussionPageUnreadPolling()
     if (tab !== 'schedule') return
     if (!semesters.value.length || !timeSlots.value.length) {
       await loadScheduleMeta()
@@ -1040,10 +1140,30 @@ watch(
   },
 )
 
+watch(
+  () => mobilePage.value,
+  async (page) => {
+    if (page === 'discussion') {
+      await loadDiscussionUnreadSummary()
+      startDiscussionPageUnreadPolling()
+      return
+    }
+    stopDiscussionPageUnreadPolling()
+  },
+)
+
 onMounted(async () => {
   await loadTasks()
   await loadExperimentCourses()
   await loadScheduleMeta()
+  await loadDiscussionUnreadSummary()
+  startDiscussionUnreadPolling()
+})
+
+onBeforeUnmount(() => {
+  stopDiscussionUnreadPolling()
+  stopDiscussionPageUnreadPolling()
+  revokeProgressImageUrls()
 })
 </script>
 
@@ -1076,7 +1196,10 @@ onMounted(async () => {
         >
           <div class="taskRow">
             <div class="taskName">{{ t.title }}</div>
-            <el-tag size="small">{{ t.status ?? 'OPEN' }}</el-tag>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <el-badge :value="taskDiscussionUnreadCount(t.id)" :hidden="taskDiscussionUnreadCount(t.id) <= 0" :max="99" />
+              <el-tag size="small">{{ t.status ?? 'OPEN' }}</el-tag>
+            </div>
           </div>
           <div class="meta">截止：{{ t.deadlineAt || '-' }}</div>
         </el-card>
@@ -1119,6 +1242,21 @@ onMounted(async () => {
                 <el-button size="small" @click="previewTaskAttachment(att)">预览</el-button>
               </div>
             </div>
+          </div>
+        </el-card>
+
+        <el-card v-if="selectedTaskId" class="block" shadow="never">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+              <div>讨论区</div>
+              <el-tag v-if="taskDiscussionUnreadCount(selectedTaskId) > 0" size="small" type="danger">
+                {{ taskDiscussionUnreadCount(selectedTaskId) }} 条老师回复未读
+              </el-tag>
+            </div>
+          </template>
+          <div class="taskRow">
+            <div class="meta">讨论区已拆成独立页面，避免和实验过程、报告提交通道混在一起。</div>
+            <el-button type="primary" size="small" @click="openDiscussionMobile">进入讨论区</el-button>
           </div>
         </el-card>
 
@@ -1367,6 +1505,30 @@ onMounted(async () => {
         </el-card>
       </div>
 
+      <div v-else-if="mobilePage === 'discussion'">
+        <div class="mobileTop">
+          <el-button size="small" @click="backToTaskMobile">返回任务详情</el-button>
+          <el-button size="small" @click="loadDiscussionUnreadSummary">刷新未读</el-button>
+        </div>
+
+        <el-card v-if="taskDetail" class="block" shadow="never">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+              <div style="font-weight: 700">{{ taskDetail.title }}</div>
+              <el-tag v-if="selectedTaskId && taskDiscussionUnreadCount(selectedTaskId) > 0" size="small" type="danger">
+                {{ taskDiscussionUnreadCount(selectedTaskId) }} 条老师回复未读
+              </el-tag>
+            </div>
+          </template>
+          <TaskDiscussionPanel
+            :task-id="selectedTaskId"
+            mode="student"
+            :polling-enabled="mobilePage === 'discussion'"
+            @changed="loadDiscussionUnreadSummary"
+          />
+        </el-card>
+      </div>
+
       <div v-else>
         <div class="mobileTop">
           <el-button size="small" @click="backToListMobile">返回首页</el-button>
@@ -1426,6 +1588,11 @@ onMounted(async () => {
           :row-class-name="({ row }: { row: TaskVO }) => (row.id === selectedTaskId ? 'is-active' : '')"
         >
           <el-table-column prop="title" label="标题" />
+          <el-table-column label="讨论" width="90" align="center">
+            <template #default="{ row }: { row: TaskVO }">
+              <el-badge :value="taskDiscussionUnreadCount(row.id)" :hidden="taskDiscussionUnreadCount(row.id) <= 0" :max="99" />
+            </template>
+          </el-table-column>
           <el-table-column prop="status" label="状态" width="90" />
         </el-table>
       </el-aside>
@@ -1475,6 +1642,21 @@ onMounted(async () => {
                   </div>
                 </el-card>
               </template>
+            </el-card>
+
+            <el-card class="block" shadow="never" v-if="selectedTaskId">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>讨论区</div>
+                  <el-tag v-if="taskDiscussionUnreadCount(selectedTaskId) > 0" size="small" type="danger">
+                    {{ taskDiscussionUnreadCount(selectedTaskId) }} 条老师回复未读
+                  </el-tag>
+                </div>
+              </template>
+              <div class="taskRow">
+                <div class="meta">讨论区已拆成独立页面，避免和实验步骤、完成登记、提交报告混排。</div>
+                <el-button type="primary" size="small" @click="openDiscussionTab">进入讨论区</el-button>
+              </div>
             </el-card>
 
             <el-card class="block" shadow="never" v-if="selectedTaskId">
@@ -1652,6 +1834,36 @@ onMounted(async () => {
                   </template>
                 </el-table-column>
               </el-table>
+            </el-card>
+          </el-tab-pane>
+
+          <el-tab-pane name="discussion">
+            <template #label>
+              <el-badge :value="discussionUnreadTotal" :hidden="discussionUnreadTotal <= 0" :max="99">
+                <span>任务讨论</span>
+              </el-badge>
+            </template>
+            <el-card v-if="selectedTaskId && taskDetail" class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                  <div>{{ taskDetail.title }}</div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                    <el-tag v-if="taskDiscussionUnreadCount(selectedTaskId) > 0" size="small" type="danger">
+                      {{ taskDiscussionUnreadCount(selectedTaskId) }} 条老师回复未读
+                    </el-tag>
+                    <el-button size="small" @click="activeTab = 'tasks'">返回任务</el-button>
+                  </div>
+                </div>
+              </template>
+              <TaskDiscussionPanel
+                :task-id="selectedTaskId"
+                mode="student"
+                :polling-enabled="activeTab === 'discussion'"
+                @changed="loadDiscussionUnreadSummary"
+              />
+            </el-card>
+            <el-card v-else class="block" shadow="never">
+              <div class="meta">请先从左侧选择一个任务进入讨论区。</div>
             </el-card>
           </el-tab-pane>
 
