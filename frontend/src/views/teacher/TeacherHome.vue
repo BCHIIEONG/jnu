@@ -1272,6 +1272,10 @@ async function createTask() {
     ElMessage.warning('任务标题和预习标题至少填写一个')
     return
   }
+  if (!createForm.experimentCourseId && createForm.classIds.length === 0) {
+    ElMessage.warning('发布班级和关联实验课程至少选择一项')
+    return
+  }
   if (createPrestudyFiles.value.length > 0 && !prestudyTitle) {
     ElMessage.warning('上传预习附件前请先填写预习标题')
     return
@@ -2432,6 +2436,10 @@ async function updateTaskTitle() {
   const prestudyTitle = editTaskForm.prestudyTitle.trim()
   if (!title && !prestudyTitle) {
     ElMessage.warning('任务标题和预习标题至少填写一个')
+    return
+  }
+  if (!editTaskForm.experimentCourseId && editTaskForm.classIds.length === 0) {
+    ElMessage.warning('发布班级和关联实验课程至少选择一项')
     return
   }
   updatingTaskTitle.value = true
@@ -4060,7 +4068,7 @@ async function copyLink() {
           绑定实验课程后，当前及后续选上该课程的学生都能看到这条任务。
         </div>
       </el-form-item>
-      <el-form-item label="发布班级（不选 = 全体学生）">
+      <el-form-item label="发布班级（可选）">
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
             <el-radio-group v-model="classScope" size="small">
               <el-radio-button label="mine">我的绑定班级</el-radio-button>
@@ -4086,7 +4094,7 @@ async function copyLink() {
           </el-select>
         </div>
           <div class="meta" style="margin-top: 6px">
-            默认仅显示管理员为你绑定的班级；切换到“全部班级”可看到全系统班级。
+            发布班级和关联实验课程至少选择一项；绑定实验课程时按课程选课名单可见。
           </div>
         </el-form-item>
       <el-form-item label="任务附件（可选）">
@@ -4150,7 +4158,7 @@ async function copyLink() {
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="发布班级（不选 = 全体学生）">
+      <el-form-item label="发布班级（可选）">
         <el-select
           v-model="editTaskForm.classIds"
           multiple
@@ -4169,6 +4177,9 @@ async function copyLink() {
             :value="c.id"
           />
         </el-select>
+        <div class="meta" style="margin-top: 6px">
+          发布班级和关联实验课程至少选择一项；绑定实验课程时按课程选课名单可见。
+        </div>
       </el-form-item>
       <el-divider content-position="left">预习内容</el-divider>
       <el-form-item label="预习标题">
@@ -4993,5 +5004,20 @@ async function copyLink() {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+:root[data-ui='mobile'] .tabs :deep(.el-tabs__nav-wrap),
+:root[data-ui='mobile'] .tabs :deep(.el-tabs__nav-scroll) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+:root[data-ui='mobile'] .tabs :deep(.el-tabs__nav-wrap::-webkit-scrollbar),
+:root[data-ui='mobile'] .tabs :deep(.el-tabs__nav-scroll::-webkit-scrollbar) {
+  display: none;
+}
+:root[data-ui='mobile'] .tabs :deep(.el-tabs__nav) {
+  white-space: nowrap;
 }
 </style>

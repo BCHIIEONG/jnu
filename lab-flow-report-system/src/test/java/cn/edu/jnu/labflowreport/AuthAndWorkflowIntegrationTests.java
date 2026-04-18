@@ -87,7 +87,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"M2任务","description":"报告主链测试"}
+                                {"title":"M2任务","description":"报告主链测试","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -145,7 +145,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"附件任务","description":"附件上传下载测试"}
+                                {"title":"附件任务","description":"附件上传下载测试","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -220,7 +220,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"越权提交流测试","description":"教师越权应被拦截"}
+                                {"title":"越权提交流测试","description":"教师越权应被拦截","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -286,7 +286,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"带资料的任务","description":"任务资料上传测试"}
+                                {"title":"带资料的任务","description":"任务资料上传测试","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -356,7 +356,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"可删除任务","description":"删除测试"}
+                                {"title":"可删除任务","description":"删除测试","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -383,7 +383,7 @@ class AuthAndWorkflowIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"旧任务名","description":"更新标题测试"}
+                                {"title":"旧任务名","description":"更新标题测试","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))

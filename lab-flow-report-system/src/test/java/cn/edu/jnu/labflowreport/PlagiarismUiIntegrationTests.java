@@ -66,8 +66,8 @@ class PlagiarismUiIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"查重演示任务","description":"用于查重摘要与高亮"}
-                                """))
+                                {"title":"查重演示任务","description":"用于查重摘要与高亮","classIds":[%d]}
+                                """.formatted(classId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();

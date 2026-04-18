@@ -173,6 +173,7 @@ public class ReportWorkflowService {
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         validateExperimentCourseBinding(user, request.experimentCourseId());
+        validateTaskAudience(request.experimentCourseId(), request.classIds());
         expTaskMapper.insert(entity);
 
         if (request.classIds() != null && !request.classIds().isEmpty()) {
@@ -370,6 +371,7 @@ public class ReportWorkflowService {
         ensureTeacherOrAdminCanManageTask(taskId, actor);
         ExpTaskEntity entity = getTaskEntityOrThrow(taskId);
         validateExperimentCourseBinding(actor, request.experimentCourseId());
+        validateTaskAudience(request.experimentCourseId(), request.classIds());
         String normalizedTitle = trimToNull(request.title());
         TaskPrestudyEntity prestudy = taskPrestudyMapper.findByTaskId(taskId);
         if (normalizedTitle == null && prestudy != null) {
@@ -1199,6 +1201,13 @@ public class ReportWorkflowService {
             tc.setClassId(classId);
             tc.setCreatedAt(now);
             taskTargetClassMapper.insert(tc);
+        }
+    }
+
+    private void validateTaskAudience(Long experimentCourseId, List<Long> classIds) {
+        boolean hasClasses = classIds != null && classIds.stream().anyMatch(Objects::nonNull);
+        if (experimentCourseId == null && !hasClasses) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "发布班级和关联实验课程至少选择一项");
         }
     }
 

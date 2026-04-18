@@ -34,7 +34,7 @@ class SubmissionMultipartIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"提交规则测试","description":"multipart + hash"}
+                                {"title":"提交规则测试","description":"multipart + hash","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
@@ -97,7 +97,7 @@ class SubmissionMultipartIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + teacherToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"提交规则测试2","description":"multipart first submit"}
+                                {"title":"提交规则测试2","description":"multipart first submit","classIds":[1]}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
