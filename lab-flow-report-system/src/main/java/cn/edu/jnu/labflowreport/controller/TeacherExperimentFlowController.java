@@ -53,6 +53,12 @@ public class TeacherExperimentFlowController {
         return ApiResponse.success(experimentFlowService.getTeacherTaskProgressDetail(taskId, studentId, user));
     }
 
+    @GetMapping("/tasks/{taskId}/progress/export/excel")
+    public ResponseEntity<byte[]> exportTaskProgressExcel(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ExportResponseHelper.xlsx("task-" + taskId + "-progress-completion.xlsx", experimentFlowService.exportTaskProgressCompletionExcel(taskId, user));
+    }
+
     @PostMapping("/tasks/{taskId}/completion/{studentId}/confirm")
     public ApiResponse<TaskCompletionVO> confirmCompletion(
             @PathVariable Long taskId,

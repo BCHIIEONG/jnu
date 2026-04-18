@@ -106,6 +106,22 @@ public class FileStorageService {
         return saveWithSha256(file, relative);
     }
 
+    public SaveResult saveTaskPrestudyAttachmentWithSha256(Long prestudyId, MultipartFile file) {
+        if (prestudyId == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "prestudyId 不能为空");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, "请选择要上传的文件");
+        }
+
+        String originalName = Objects.toString(file.getOriginalFilename(), "attachment");
+        String safeName = sanitizeFilename(originalName);
+        String ext = extractExt(safeName);
+        String storedName = UUID.randomUUID().toString().replace("-", "") + ext;
+        String relative = Path.of("task-prestudy-attachments", String.valueOf(prestudyId), storedName).toString();
+        return saveWithSha256(file, relative);
+    }
+
     public byte[] readBytes(String relativePath) {
         Path target = resolveUnderBase(relativePath);
         try {

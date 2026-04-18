@@ -19,6 +19,13 @@ type TaskVO = {
   status?: string
   createdAt?: string
   attachments?: TaskAttachmentVO[]
+  prestudyId?: number | null
+  prestudyTitle?: string | null
+  prestudyDescription?: string | null
+  prestudyVersion?: number | null
+  prestudyPublishedAt?: string | null
+  prestudyUnread?: boolean
+  prestudyAttachments?: TaskPrestudyAttachmentVO[]
 }
 
 type TaskAttachmentVO = {
@@ -29,6 +36,16 @@ type TaskAttachmentVO = {
   contentType?: string | null
   uploadedAt: string
   uploadedBy?: number | null
+}
+
+type TaskPrestudyAttachmentVO = {
+  id: number
+  prestudyId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedBy?: number | null
+  uploadedAt?: string | null
 }
 
 type SubmissionVO = {
@@ -86,6 +103,17 @@ type TaskDiscussionUnreadItemVO = {
 type StudentDiscussionUnreadSummaryVO = {
   totalUnreadCount: number
   items: TaskDiscussionUnreadItemVO[]
+}
+
+type TaskPrestudyNotificationVO = {
+  taskId: number
+  taskTitle: string
+  prestudyId: number
+  prestudyTitle: string
+  prestudyDescription?: string | null
+  prestudyVersion: number
+  prestudyPublishedAt?: string | null
+  prestudyAttachments: TaskPrestudyAttachmentVO[]
 }
 
 type TaskDeviceConfigVO = {
@@ -291,6 +319,9 @@ const discussionUnreadByTaskId = ref<Record<number, number>>({})
 const discussionUnreadTotal = ref(0)
 let discussionUnreadTimer: number | null = null
 let discussionPageUnreadTimer: number | null = null
+const prestudyNotifications = ref<TaskPrestudyNotificationVO[]>([])
+const prestudyDialogOpen = ref(false)
+const markingPrestudyRead = ref(false)
 const scheduleSemesterId = ref<number | null>(null)
 const weekStartDate = ref(getWeekStartYmd(new Date()))
 const weekItems = ref<WeekScheduleItem[]>([])
@@ -402,6 +433,45 @@ function taskDiscussionUnreadCount(taskId: number) {
   return discussionUnreadByTaskId.value[taskId] ?? 0
 }
 
+function isRbacSelfCheckTask(task: TaskVO) {
+  return task.title === 'RBAC自检任务' && (task.description ?? '') === '用于验证管理员权限'
+}
+
+function taskHasPrestudy(task?: TaskVO | null) {
+  return Boolean(task?.prestudyTitle)
+}
+
+async function loadUnreadPrestudies(showDialog = true) {
+  try {
+    const rows = await apiData<TaskPrestudyNotificationVO[]>('/api/tasks/prestudy/unread', { method: 'GET' }, auth.token)
+    prestudyNotifications.value = rows
+    prestudyDialogOpen.value = showDialog && rows.length > 0
+  } catch {
+    prestudyNotifications.value = []
+    prestudyDialogOpen.value = false
+  }
+}
+
+async function acknowledgePrestudies() {
+  if (prestudyNotifications.value.length === 0) {
+    prestudyDialogOpen.value = false
+    return
+  }
+  markingPrestudyRead.value = true
+  try {
+    for (const item of prestudyNotifications.value) {
+      await apiData(`/api/tasks/${item.taskId}/prestudy/read`, { method: 'POST' }, auth.token)
+    }
+    prestudyDialogOpen.value = false
+    prestudyNotifications.value = []
+    await loadTasks(false)
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '确认预习提醒失败')
+  } finally {
+    markingPrestudyRead.value = false
+  }
+}
+
 async function loadDiscussionUnreadSummary() {
   try {
     const summary = await apiData<StudentDiscussionUnreadSummaryVO>(
@@ -455,13 +525,17 @@ function startDiscussionPageUnreadPolling() {
   }, 16000)
 }
 
-async function loadTasks() {
+async function loadTasks(checkPrestudy = true) {
   loadingTasks.value = true
   try {
-    tasks.value = await apiData<TaskVO[]>('/api/tasks', { method: 'GET' }, auth.token)
+    const rows = await apiData<TaskVO[]>('/api/tasks', { method: 'GET' }, auth.token)
+    tasks.value = rows.filter((task) => !isRbacSelfCheckTask(task))
     if (!isMobile.value && tasks.value.length > 0 && selectedTaskId.value === null) {
       const first = tasks.value[0]
       if (first) await selectTask(first.id)
+    }
+    if (checkPrestudy) {
+      await loadUnreadPrestudies(true)
     }
   } finally {
     loadingTasks.value = false
@@ -973,6 +1047,60 @@ async function downloadTaskAttachment(row: TaskAttachmentVO) {
   }
 }
 
+async function downloadPrestudyAttachment(row: TaskPrestudyAttachmentVO, taskId = selectedTaskId.value) {
+  if (!taskId) return
+  try {
+    await downloadBlob(`/api/tasks/${taskId}/prestudy/attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `prestudy-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+async function previewPrestudyAttachment(row: TaskPrestudyAttachmentVO, taskId = selectedTaskId.value) {
+  if (!taskId) return
+  try {
+    closePreview()
+    const { blob, contentType } = await fetchBlob(`/api/tasks/${taskId}/prestudy/attachments/${row.id}/download`, { token: auth.token })
+    const ct = (row.contentType ?? contentType ?? '').toLowerCase()
+    const name = (row.fileName ?? '').toLowerCase()
+    const ext = name.includes('.') ? name.split('.').pop() || '' : ''
+    const isTextLike =
+      ct.startsWith('text/') ||
+      ct.includes('json') ||
+      ct.includes('xml') ||
+      ct.includes('yaml') ||
+      ['txt', 'md', 'log', 'json', 'xml', 'yml', 'yaml', 'sql', 'java', 'py', 'js', 'ts', 'vue', 'html', 'css', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1'].includes(ext)
+
+    if (ct.startsWith('image/')) {
+      previewKind.value = 'image'
+      previewUrl.value = URL.createObjectURL(blob)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    if (isTextLike) {
+      if (blob.size > 200 * 1024) {
+        ElMessage.info('文件较大，建议下载查看')
+        return
+      }
+      const buf = await blob.arrayBuffer()
+      previewKind.value = 'text'
+      previewText.value = new TextDecoder('utf-8').decode(buf)
+      previewTitle.value = row.fileName
+      previewDialog.value = true
+      return
+    }
+
+    ElMessage.info('该类型暂不支持在线预览，请下载查看')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '预览失败')
+  }
+}
+
 async function previewTaskAttachment(row: TaskAttachmentVO) {
   try {
     closePreview()
@@ -1211,6 +1339,7 @@ onBeforeUnmount(() => {
             <div class="taskName">{{ t.title }}</div>
             <div style="display: flex; align-items: center; gap: 8px">
               <el-badge :value="taskDiscussionUnreadCount(t.id)" :hidden="taskDiscussionUnreadCount(t.id) <= 0" :max="99" />
+              <el-tag v-if="taskHasPrestudy(t)" size="small" type="warning">预习</el-tag>
               <el-tag size="small">{{ t.status ?? 'OPEN' }}</el-tag>
             </div>
           </div>
@@ -1235,6 +1364,27 @@ onBeforeUnmount(() => {
           </template>
           <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
           <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+        </el-card>
+
+        <el-card v-if="taskHasPrestudy(taskDetail)" class="block" shadow="never">
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+              <div>预习内容</div>
+              <el-tag size="small" type="warning">预习</el-tag>
+            </div>
+          </template>
+          <div class="progressTitle">{{ taskDetail?.prestudyTitle }}</div>
+          <div class="meta" style="margin-top: 8px; white-space: pre-wrap">{{ taskDetail?.prestudyDescription || '（无说明）' }}</div>
+          <div v-if="(taskDetail?.prestudyAttachments || []).length > 0" class="progressAtts">
+            <div v-for="att in taskDetail?.prestudyAttachments || []" :key="att.id" class="progressAtt">
+              <div class="attName">{{ att.fileName }}</div>
+              <div class="meta">大小：{{ att.fileSize }} Byte</div>
+              <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                <el-button size="small" @click="downloadPrestudyAttachment(att)">下载</el-button>
+                <el-button size="small" @click="previewPrestudyAttachment(att)">预览</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
 
         <el-card v-if="taskDetail" class="block" shadow="never">
@@ -1600,7 +1750,14 @@ onBeforeUnmount(() => {
           @row-click="(row: TaskVO) => selectTask(row.id)"
           :row-class-name="({ row }: { row: TaskVO }) => (row.id === selectedTaskId ? 'is-active' : '')"
         >
-          <el-table-column prop="title" label="标题" />
+          <el-table-column label="标题">
+            <template #default="{ row }: { row: TaskVO }">
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+                <span>{{ row.title }}</span>
+                <el-tag v-if="taskHasPrestudy(row)" size="small" type="warning">预习</el-tag>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="讨论" width="90" align="center">
             <template #default="{ row }: { row: TaskVO }">
               <el-badge :value="taskDiscussionUnreadCount(row.id)" :hidden="taskDiscussionUnreadCount(row.id) <= 0" :max="99" />
@@ -1621,6 +1778,27 @@ onBeforeUnmount(() => {
               </template>
               <div class="meta" style="margin-bottom: 10px">截止：{{ taskDetail.deadlineAt || '-' }}</div>
               <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+            </el-card>
+
+            <el-card v-if="taskHasPrestudy(taskDetail)" class="block" shadow="never">
+              <template #header>
+                <div style="display: flex; justify-content: space-between; align-items: center">
+                  <div>预习内容</div>
+                  <el-tag size="small" type="warning">预习</el-tag>
+                </div>
+              </template>
+              <div class="progressTitle">{{ taskDetail?.prestudyTitle }}</div>
+              <div class="meta" style="margin-top: 8px; white-space: pre-wrap">{{ taskDetail?.prestudyDescription || '（无说明）' }}</div>
+              <div v-if="(taskDetail?.prestudyAttachments || []).length > 0" class="progressAtts">
+                <div v-for="att in taskDetail?.prestudyAttachments || []" :key="att.id" class="progressAtt">
+                  <div class="attName">{{ att.fileName }}</div>
+                  <div class="meta">大小：{{ att.fileSize }} Byte</div>
+                  <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                    <el-button size="small" @click="downloadPrestudyAttachment(att)">下载</el-button>
+                    <el-button size="small" @click="previewPrestudyAttachment(att)">预览</el-button>
+                  </div>
+                </div>
+              </div>
             </el-card>
 
             <el-card v-if="taskDetail" class="block" shadow="never">
@@ -2074,6 +2252,33 @@ onBeforeUnmount(() => {
       </el-card>
     </template>
     <div class="meta" style="margin-top: 6px">支持图片与小型文本/代码在线预览（大文件请下载）。</div>
+  </el-dialog>
+
+  <el-dialog v-model="prestudyDialogOpen" title="新的预习内容" :width="isMobile ? '92vw' : '680px'" :close-on-click-modal="false">
+    <div v-if="prestudyNotifications.length === 0" class="meta">暂无新的预习内容</div>
+    <el-card v-for="item in prestudyNotifications" :key="`${item.prestudyId}-${item.prestudyVersion}`" shadow="never" class="subCard">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+          <div>{{ item.taskTitle }}</div>
+          <el-tag size="small" type="warning">预习 v{{ item.prestudyVersion }}</el-tag>
+        </div>
+      </template>
+      <div class="progressTitle">{{ item.prestudyTitle }}</div>
+      <div class="meta" style="margin-top: 8px; white-space: pre-wrap">{{ item.prestudyDescription || '（无说明）' }}</div>
+      <div v-if="item.prestudyAttachments.length > 0" class="progressAtts">
+        <div v-for="att in item.prestudyAttachments" :key="att.id" class="progressAtt">
+          <div class="attName">{{ att.fileName }}</div>
+          <div class="meta">大小：{{ att.fileSize }} Byte</div>
+          <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+            <el-button size="small" @click="downloadPrestudyAttachment(att, item.taskId)">下载</el-button>
+            <el-button size="small" @click="previewPrestudyAttachment(att, item.taskId)">预览</el-button>
+          </div>
+        </div>
+      </div>
+    </el-card>
+    <template #footer>
+      <el-button type="primary" :loading="markingPrestudyRead" @click="acknowledgePrestudies">我知道了</el-button>
+    </template>
   </el-dialog>
 
   <el-dialog v-model="previewDialog" :title="previewTitle || '附件预览'" width="900px" @closed="closePreview">

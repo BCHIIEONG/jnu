@@ -7,13 +7,17 @@ import cn.edu.jnu.labflowreport.common.export.ExportResponseHelper;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskPrestudyUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskStatusUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskTitleUpdateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.service.ReportAttachmentService;
 import cn.edu.jnu.labflowreport.workflow.service.ReportWorkflowService;
 import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
 import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskAttachmentVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskPrestudyAttachmentVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskPrestudyNotificationVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import jakarta.validation.Valid;
 import java.io.ByteArrayOutputStream;
@@ -62,6 +66,13 @@ public class ReportWorkflowController {
     public ApiResponse<List<TaskVO>> listTasks() {
         AuthenticatedUser user = SecurityUtils.currentUser();
         return ApiResponse.success(reportWorkflowService.listTasks(user));
+    }
+
+    @GetMapping("/tasks/prestudy/unread")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ApiResponse<List<TaskPrestudyNotificationVO>> listUnreadPrestudies() {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        return ApiResponse.success(reportWorkflowService.listUnreadPrestudies(user));
     }
 
     @GetMapping("/tasks/{taskId}")
@@ -121,6 +132,59 @@ public class ReportWorkflowController {
     public ApiResponse<TaskVO> updateTaskTitle(@PathVariable Long taskId, @Valid @RequestBody TaskTitleUpdateRequest request) {
         AuthenticatedUser actor = SecurityUtils.currentUser();
         return ApiResponse.success("任务标题已更新", reportWorkflowService.updateTaskTitle(taskId, actor, request));
+    }
+
+    @PutMapping("/tasks/{taskId}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<TaskVO> updateTask(@PathVariable Long taskId, @RequestBody TaskUpdateRequest request) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("任务已更新", reportWorkflowService.updateTask(taskId, actor, request));
+    }
+
+    @PutMapping("/tasks/{taskId}/prestudy")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<TaskVO> updatePrestudy(@PathVariable Long taskId, @Valid @RequestBody TaskPrestudyUpdateRequest request) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("预习内容已发布", reportWorkflowService.updatePrestudy(taskId, actor, request));
+    }
+
+    @PostMapping(value = "/tasks/{taskId}/prestudy/attachments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<List<TaskPrestudyAttachmentVO>> uploadPrestudyAttachments(
+            @PathVariable Long taskId,
+            @RequestParam(value = "files", required = false) MultipartFile[] files
+    ) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("预习附件上传成功", reportWorkflowService.uploadPrestudyAttachments(taskId, actor, files));
+    }
+
+    @DeleteMapping("/tasks/{taskId}/prestudy/attachments/{attachmentId}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN')")
+    public ApiResponse<List<TaskPrestudyAttachmentVO>> deletePrestudyAttachment(@PathVariable Long taskId, @PathVariable Long attachmentId) {
+        AuthenticatedUser actor = SecurityUtils.currentUser();
+        return ApiResponse.success("删除成功", reportWorkflowService.deletePrestudyAttachment(taskId, attachmentId, actor));
+    }
+
+    @PostMapping("/tasks/{taskId}/prestudy/read")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ApiResponse<Void> markPrestudyRead(@PathVariable Long taskId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        reportWorkflowService.markPrestudyRead(taskId, user);
+        return ApiResponse.success("已读", null);
+    }
+
+    @GetMapping("/tasks/{taskId}/prestudy/attachments/{attachmentId}/download")
+    public ResponseEntity<byte[]> downloadPrestudyAttachment(@PathVariable Long taskId, @PathVariable Long attachmentId) {
+        AuthenticatedUser user = SecurityUtils.currentUser();
+        ReportWorkflowService.DownloadData data = reportWorkflowService.downloadPrestudyAttachment(taskId, attachmentId, user);
+        String filename = data.filename() == null ? ("prestudy-attachment-" + attachmentId) : data.filename();
+        MediaType contentType = data.contentType() == null || data.contentType().isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM
+                : MediaType.parseMediaType(data.contentType());
+        return ResponseEntity.status(HttpStatus.OK)
+                .contentType(contentType)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(data.bytes());
     }
 
     @PostMapping("/tasks/{taskId}/submissions")

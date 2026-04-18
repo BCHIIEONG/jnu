@@ -294,7 +294,6 @@ defineExpose({ loadDiscussion })
       <template #header>
         <div class="discussionHeaderRow">
           <div>发起讨论</div>
-          <div class="meta">向老师提问会进入教师问答聚合提醒；普通讨论不会提醒老师。</div>
         </div>
       </template>
       <div class="discussionTypeRow">

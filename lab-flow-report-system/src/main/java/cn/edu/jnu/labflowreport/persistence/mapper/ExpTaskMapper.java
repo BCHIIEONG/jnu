@@ -20,10 +20,16 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
-                   t.created_at
+                   t.created_at,
+                   p.id AS prestudy_id,
+                   p.title AS prestudy_title,
+                   p.description AS prestudy_description,
+                   p.version AS prestudy_version,
+                   p.published_at AS prestudy_published_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
             LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
+            LEFT JOIN task_prestudy p ON p.task_id = t.id
             ORDER BY t.created_at DESC
             """)
     List<TaskVO> findTaskList();
@@ -38,10 +44,16 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
-                   t.created_at
+                   t.created_at,
+                   p.id AS prestudy_id,
+                   p.title AS prestudy_title,
+                   p.description AS prestudy_description,
+                   p.version AS prestudy_version,
+                   p.published_at AS prestudy_published_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
             LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
+            LEFT JOIN task_prestudy p ON p.task_id = t.id
             WHERE t.publisher_id = #{publisherId}
             ORDER BY t.created_at DESC
             """)
@@ -57,10 +69,16 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
-                   t.created_at
+                   t.created_at,
+                   p.id AS prestudy_id,
+                   p.title AS prestudy_title,
+                   p.description AS prestudy_description,
+                   p.version AS prestudy_version,
+                   p.published_at AS prestudy_published_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
             LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
+            LEFT JOIN task_prestudy p ON p.task_id = t.id
             WHERE (
                 (
                     t.experiment_course_id IS NULL
@@ -102,10 +120,16 @@ public interface ExpTaskMapper extends BaseMapper<ExpTaskEntity> {
                    ec.title AS experiment_course_title,
                    t.deadline_at,
                    t.status,
-                   t.created_at
+                   t.created_at,
+                   p.id AS prestudy_id,
+                   p.title AS prestudy_title,
+                   p.description AS prestudy_description,
+                   p.version AS prestudy_version,
+                   p.published_at AS prestudy_published_at
             FROM exp_task t
             JOIN sys_user u ON u.id = t.publisher_id
             LEFT JOIN experiment_course ec ON ec.id = t.experiment_course_id
+            LEFT JOIN task_prestudy p ON p.task_id = t.id
             WHERE t.id = #{taskId}
             """)
     TaskVO findTaskById(Long taskId);

@@ -16,5 +16,13 @@ public class TaskVO {
     private LocalDateTime deadlineAt;
     private String status;
     private LocalDateTime createdAt;
+    private List<Long> classIds;
     private List<TaskAttachmentVO> attachments;
+    private Long prestudyId;
+    private String prestudyTitle;
+    private String prestudyDescription;
+    private Integer prestudyVersion;
+    private LocalDateTime prestudyPublishedAt;
+    private Boolean prestudyUnread;
+    private List<TaskPrestudyAttachmentVO> prestudyAttachments;
 }

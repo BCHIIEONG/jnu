@@ -21,6 +21,9 @@ import cn.edu.jnu.labflowreport.persistence.entity.TaskAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskCompletionEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceConfigEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskDeviceRequestEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskPrestudyAttachmentEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskPrestudyEntity;
+import cn.edu.jnu.labflowreport.persistence.entity.TaskPrestudyReadStateEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskProgressAttachmentEntity;
 import cn.edu.jnu.labflowreport.persistence.entity.TaskProgressLogEntity;
 import cn.edu.jnu.labflowreport.persistence.mapper.ExpTaskMapper;
@@ -39,6 +42,9 @@ import cn.edu.jnu.labflowreport.persistence.mapper.TaskAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskCompletionMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceConfigMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskDeviceRequestMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskPrestudyAttachmentMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskPrestudyMapper;
+import cn.edu.jnu.labflowreport.persistence.mapper.TaskPrestudyReadStateMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressAttachmentMapper;
 import cn.edu.jnu.labflowreport.persistence.mapper.TaskProgressLogMapper;
 import cn.edu.jnu.labflowreport.storage.FileStorageService;
@@ -46,11 +52,15 @@ import cn.edu.jnu.labflowreport.workflow.ReviewIssueTags;
 import cn.edu.jnu.labflowreport.workflow.dto.ReviewCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.SubmissionCreateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskCreateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskPrestudyUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.dto.TaskTitleUpdateRequest;
+import cn.edu.jnu.labflowreport.workflow.dto.TaskUpdateRequest;
 import cn.edu.jnu.labflowreport.workflow.vo.ReviewVO;
 import cn.edu.jnu.labflowreport.workflow.vo.ScoreExportRowVO;
 import cn.edu.jnu.labflowreport.workflow.vo.SubmissionVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskAttachmentVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskPrestudyAttachmentVO;
+import cn.edu.jnu.labflowreport.workflow.vo.TaskPrestudyNotificationVO;
 import cn.edu.jnu.labflowreport.workflow.vo.TaskVO;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -79,6 +89,9 @@ public class ReportWorkflowService {
     private final ExpTaskTargetClassMapper taskTargetClassMapper;
     private final SysUserMapper sysUserMapper;
     private final TaskAttachmentMapper taskAttachmentMapper;
+    private final TaskPrestudyMapper taskPrestudyMapper;
+    private final TaskPrestudyAttachmentMapper taskPrestudyAttachmentMapper;
+    private final TaskPrestudyReadStateMapper taskPrestudyReadStateMapper;
     private final TaskProgressLogMapper taskProgressLogMapper;
     private final TaskProgressAttachmentMapper taskProgressAttachmentMapper;
     private final TaskCompletionMapper taskCompletionMapper;
@@ -102,6 +115,9 @@ public class ReportWorkflowService {
             ExpTaskTargetClassMapper taskTargetClassMapper,
             SysUserMapper sysUserMapper,
             TaskAttachmentMapper taskAttachmentMapper,
+            TaskPrestudyMapper taskPrestudyMapper,
+            TaskPrestudyAttachmentMapper taskPrestudyAttachmentMapper,
+            TaskPrestudyReadStateMapper taskPrestudyReadStateMapper,
             TaskProgressLogMapper taskProgressLogMapper,
             TaskProgressAttachmentMapper taskProgressAttachmentMapper,
             TaskCompletionMapper taskCompletionMapper,
@@ -124,6 +140,9 @@ public class ReportWorkflowService {
         this.taskTargetClassMapper = taskTargetClassMapper;
         this.sysUserMapper = sysUserMapper;
         this.taskAttachmentMapper = taskAttachmentMapper;
+        this.taskPrestudyMapper = taskPrestudyMapper;
+        this.taskPrestudyAttachmentMapper = taskPrestudyAttachmentMapper;
+        this.taskPrestudyReadStateMapper = taskPrestudyReadStateMapper;
         this.taskProgressLogMapper = taskProgressLogMapper;
         this.taskProgressAttachmentMapper = taskProgressAttachmentMapper;
         this.taskCompletionMapper = taskCompletionMapper;
@@ -139,8 +158,13 @@ public class ReportWorkflowService {
 
     @Transactional
     public TaskVO createTask(AuthenticatedUser user, TaskCreateRequest request) {
+        String title = trimToNull(request.title());
+        String prestudyTitle = trimToNull(request.prestudyTitle());
+        if (title == null && prestudyTitle == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务标题和预习标题至少填写一个");
+        }
         ExpTaskEntity entity = new ExpTaskEntity();
-        entity.setTitle(request.title());
+        entity.setTitle(title == null ? prestudyTitle : title);
         entity.setDescription(request.description());
         entity.setPublisherId(user.userId());
         entity.setExperimentCourseId(request.experimentCourseId());
@@ -162,6 +186,9 @@ public class ReportWorkflowService {
                 taskTargetClassMapper.insert(tc);
             }
         }
+        if (prestudyTitle != null) {
+            createOrUpdatePrestudyEntity(entity.getId(), prestudyTitle, request.prestudyDescription(), true);
+        }
         return getTask(entity.getId());
     }
 
@@ -170,12 +197,12 @@ public class ReportWorkflowService {
             throw new BusinessException(ApiCode.UNAUTHORIZED, HttpStatus.UNAUTHORIZED, "未登录或登录已失效");
         }
         if (user.roleCodes().contains("ROLE_ADMIN")) {
-            return expTaskMapper.findTaskList();
+            return populateTaskVos(expTaskMapper.findTaskList(), user);
         }
         if (user.roleCodes().contains("ROLE_TEACHER")) {
-            return expTaskMapper.findTaskListForTeacher(user.userId());
+            return populateTaskVos(expTaskMapper.findTaskListForTeacher(user.userId()), user);
         }
-        return expTaskMapper.findTaskListForStudent(user.userId());
+        return populateTaskVos(expTaskMapper.findTaskListForStudent(user.userId()), user);
     }
 
     public TaskVO getTask(Long taskId) {
@@ -183,7 +210,9 @@ public class ReportWorkflowService {
         if (task == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "任务不存在");
         }
+        task.setClassIds(taskTargetClassMapper.findTargetClassIds(taskId));
         task.setAttachments(listTaskAttachmentVos(taskId));
+        populatePrestudy(task, null);
         return task;
     }
 
@@ -250,6 +279,8 @@ public class ReportWorkflowService {
         getTaskEntityOrThrow(taskId);
 
         List<TaskAttachmentEntity> taskAttachments = taskAttachmentMapper.findByTaskId(taskId);
+        TaskPrestudyEntity prestudy = taskPrestudyMapper.findByTaskId(taskId);
+        List<TaskPrestudyAttachmentEntity> prestudyAttachments = prestudy == null ? List.of() : taskPrestudyAttachmentMapper.findByPrestudyId(prestudy.getId());
         List<ReportSubmissionEntity> submissions = submissionMapper.selectList(new LambdaQueryWrapper<ReportSubmissionEntity>()
                 .eq(ReportSubmissionEntity::getTaskId, taskId));
         List<Long> submissionIds = submissions.stream()
@@ -302,6 +333,13 @@ public class ReportWorkflowService {
                 .eq(TaskProgressLogEntity::getTaskId, taskId));
         taskAttachmentMapper.delete(new LambdaQueryWrapper<TaskAttachmentEntity>()
                 .eq(TaskAttachmentEntity::getTaskId, taskId));
+        if (prestudy != null) {
+            taskPrestudyReadStateMapper.delete(new LambdaQueryWrapper<TaskPrestudyReadStateEntity>()
+                    .eq(TaskPrestudyReadStateEntity::getPrestudyId, prestudy.getId()));
+            taskPrestudyAttachmentMapper.delete(new LambdaQueryWrapper<TaskPrestudyAttachmentEntity>()
+                    .eq(TaskPrestudyAttachmentEntity::getPrestudyId, prestudy.getId()));
+            taskPrestudyMapper.deleteById(prestudy.getId());
+        }
         taskTargetClassMapper.delete(new LambdaQueryWrapper<ExpTaskTargetClassEntity>()
                 .eq(ExpTaskTargetClassEntity::getTaskId, taskId));
         submissionMapper.delete(new LambdaQueryWrapper<ReportSubmissionEntity>()
@@ -309,6 +347,7 @@ public class ReportWorkflowService {
         expTaskMapper.deleteById(taskId);
 
         deleteStoredFiles(taskAttachments.stream().map(TaskAttachmentEntity::getFilePath).toList());
+        deleteStoredFiles(prestudyAttachments.stream().map(TaskPrestudyAttachmentEntity::getFilePath).toList());
         deleteStoredFiles(reportAttachments.stream().map(ReportAttachmentEntity::getFilePath).toList());
         deleteStoredFiles(progressAttachments.stream().map(TaskProgressAttachmentEntity::getRelativePath).toList());
     }
@@ -326,6 +365,126 @@ public class ReportWorkflowService {
         return getTask(taskId);
     }
 
+    @Transactional
+    public TaskVO updateTask(Long taskId, AuthenticatedUser actor, TaskUpdateRequest request) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        ExpTaskEntity entity = getTaskEntityOrThrow(taskId);
+        validateExperimentCourseBinding(actor, request.experimentCourseId());
+        String normalizedTitle = trimToNull(request.title());
+        TaskPrestudyEntity prestudy = taskPrestudyMapper.findByTaskId(taskId);
+        if (normalizedTitle == null && prestudy != null) {
+            normalizedTitle = prestudy.getTitle();
+        }
+        if (normalizedTitle == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "任务标题不能为空");
+        }
+        entity.setTitle(normalizedTitle);
+        entity.setDescription(request.description());
+        entity.setDeadlineAt(request.deadlineAt());
+        entity.setExperimentCourseId(request.experimentCourseId());
+        entity.setUpdatedAt(LocalDateTime.now());
+        expTaskMapper.updateById(entity);
+        replaceTaskTargetClasses(taskId, request.classIds());
+        return getTask(taskId);
+    }
+
+    @Transactional
+    public TaskVO updatePrestudy(Long taskId, AuthenticatedUser actor, TaskPrestudyUpdateRequest request) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        createOrUpdatePrestudyEntity(taskId, request.title(), request.description(), false);
+        return getTask(taskId);
+    }
+
+    @Transactional
+    public List<TaskPrestudyAttachmentVO> uploadPrestudyAttachments(Long taskId, AuthenticatedUser actor, MultipartFile[] files) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        TaskPrestudyEntity prestudy = requirePrestudy(taskId);
+        List<MultipartFile> incoming = new ArrayList<>();
+        if (files != null) {
+            for (MultipartFile file : files) {
+                if (file != null && !file.isEmpty()) {
+                    incoming.add(file);
+                }
+            }
+        }
+        if (incoming.isEmpty()) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "请选择要上传的预习附件");
+        }
+        for (MultipartFile file : incoming) {
+            FileStorageService.SaveResult saved = storageService.saveTaskPrestudyAttachmentWithSha256(prestudy.getId(), file);
+            TaskPrestudyAttachmentEntity entity = new TaskPrestudyAttachmentEntity();
+            entity.setPrestudyId(prestudy.getId());
+            entity.setFileName(Objects.toString(file.getOriginalFilename(), "attachment"));
+            entity.setFilePath(saved.relativePath());
+            entity.setFileSize(file.getSize());
+            entity.setContentType(file.getContentType());
+            entity.setUploadedBy(actor.userId());
+            entity.setUploadedAt(LocalDateTime.now());
+            entity.setCreatedAt(LocalDateTime.now());
+            taskPrestudyAttachmentMapper.insert(entity);
+        }
+        bumpPrestudyVersion(prestudy);
+        return listPrestudyAttachmentVos(prestudy.getId());
+    }
+
+    @Transactional
+    public List<TaskPrestudyAttachmentVO> deletePrestudyAttachment(Long taskId, Long attachmentId, AuthenticatedUser actor) {
+        ensureTeacherOrAdminCanManageTask(taskId, actor);
+        TaskPrestudyEntity prestudy = requirePrestudy(taskId);
+        TaskPrestudyAttachmentEntity attachment = taskPrestudyAttachmentMapper.selectById(attachmentId);
+        if (attachment == null || !Objects.equals(attachment.getPrestudyId(), prestudy.getId())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "预习附件不存在");
+        }
+        taskPrestudyAttachmentMapper.deleteById(attachmentId);
+        storageService.delete(attachment.getFilePath());
+        bumpPrestudyVersion(prestudy);
+        return listPrestudyAttachmentVos(prestudy.getId());
+    }
+
+    public DownloadData downloadPrestudyAttachment(Long taskId, Long attachmentId, AuthenticatedUser user) {
+        getTaskForUser(taskId, user);
+        TaskPrestudyEntity prestudy = requirePrestudy(taskId);
+        TaskPrestudyAttachmentEntity attachment = taskPrestudyAttachmentMapper.selectById(attachmentId);
+        if (attachment == null || !Objects.equals(attachment.getPrestudyId(), prestudy.getId())) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "预习附件不存在");
+        }
+        return new DownloadData(attachment.getFileName(), attachment.getContentType(), storageService.readBytes(attachment.getFilePath()));
+    }
+
+    public List<TaskPrestudyNotificationVO> listUnreadPrestudies(AuthenticatedUser student) {
+        if (student == null || student.roleCodes() == null || !student.roleCodes().contains("ROLE_STUDENT")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只有学生可以查看预习通知");
+        }
+        return listTasks(student).stream()
+                .filter(task -> task.getPrestudyId() != null)
+                .filter(task -> Boolean.TRUE.equals(task.getPrestudyUnread()))
+                .map(this::toPrestudyNotification)
+                .toList();
+    }
+
+    @Transactional
+    public void markPrestudyRead(Long taskId, AuthenticatedUser student) {
+        if (student == null || student.roleCodes() == null || !student.roleCodes().contains("ROLE_STUDENT")) {
+            throw new BusinessException(ApiCode.FORBIDDEN, HttpStatus.FORBIDDEN, "只有学生可以标记预习已读");
+        }
+        getTaskForUser(taskId, student);
+        TaskPrestudyEntity prestudy = requirePrestudy(taskId);
+        TaskPrestudyReadStateEntity state = taskPrestudyReadStateMapper.findByPrestudyAndStudent(prestudy.getId(), student.userId());
+        LocalDateTime now = LocalDateTime.now();
+        if (state == null) {
+            state = new TaskPrestudyReadStateEntity();
+            state.setPrestudyId(prestudy.getId());
+            state.setStudentId(student.userId());
+            state.setLastReadVersion(prestudy.getVersion());
+            state.setLastReadAt(now);
+            taskPrestudyReadStateMapper.insert(state);
+            return;
+        }
+        state.setLastReadVersion(prestudy.getVersion());
+        state.setLastReadAt(now);
+        taskPrestudyReadStateMapper.updateById(state);
+    }
+
     public TaskVO getTaskForUser(Long taskId, AuthenticatedUser user) {
         TaskVO task = getTask(taskId);
         if (user == null || user.roleCodes() == null) {
@@ -341,6 +500,7 @@ public class ReportWorkflowService {
             return task;
         }
         ensureStudentCanAccessTask(taskId, user.userId());
+        populatePrestudy(task, user);
         return task;
     }
 
@@ -905,6 +1065,153 @@ public class ReportWorkflowService {
         return taskAttachmentMapper.findByTaskId(taskId).stream()
                 .map(this::toTaskAttachmentVo)
                 .toList();
+    }
+
+    private List<TaskVO> populateTaskVos(List<TaskVO> tasks, AuthenticatedUser viewer) {
+        if (tasks == null || tasks.isEmpty()) {
+            return List.of();
+        }
+        for (TaskVO task : tasks) {
+            populatePrestudy(task, viewer);
+        }
+        return tasks;
+    }
+
+    private void populatePrestudy(TaskVO task, AuthenticatedUser viewer) {
+        if (task == null || task.getId() == null) {
+            return;
+        }
+        TaskPrestudyEntity prestudy = taskPrestudyMapper.findByTaskId(task.getId());
+        if (prestudy == null) {
+            task.setPrestudyAttachments(List.of());
+            task.setPrestudyUnread(false);
+            return;
+        }
+        task.setPrestudyId(prestudy.getId());
+        task.setPrestudyTitle(prestudy.getTitle());
+        task.setPrestudyDescription(prestudy.getDescription());
+        task.setPrestudyVersion(prestudy.getVersion());
+        task.setPrestudyPublishedAt(prestudy.getPublishedAt());
+        task.setPrestudyAttachments(listPrestudyAttachmentVos(prestudy.getId()));
+        task.setPrestudyUnread(isPrestudyUnread(prestudy, viewer));
+    }
+
+    private boolean isPrestudyUnread(TaskPrestudyEntity prestudy, AuthenticatedUser viewer) {
+        if (prestudy == null || viewer == null || viewer.roleCodes() == null || !viewer.roleCodes().contains("ROLE_STUDENT")) {
+            return false;
+        }
+        TaskPrestudyReadStateEntity state = taskPrestudyReadStateMapper.findByPrestudyAndStudent(prestudy.getId(), viewer.userId());
+        return state == null || state.getLastReadVersion() == null || state.getLastReadVersion() < nvl(prestudy.getVersion());
+    }
+
+    private List<TaskPrestudyAttachmentVO> listPrestudyAttachmentVos(Long prestudyId) {
+        if (prestudyId == null) {
+            return List.of();
+        }
+        return taskPrestudyAttachmentMapper.findByPrestudyId(prestudyId).stream()
+                .map(this::toPrestudyAttachmentVo)
+                .toList();
+    }
+
+    private TaskPrestudyAttachmentVO toPrestudyAttachmentVo(TaskPrestudyAttachmentEntity entity) {
+        TaskPrestudyAttachmentVO vo = new TaskPrestudyAttachmentVO();
+        vo.setId(entity.getId());
+        vo.setPrestudyId(entity.getPrestudyId());
+        vo.setFileName(entity.getFileName());
+        vo.setFileSize(entity.getFileSize());
+        vo.setContentType(entity.getContentType());
+        vo.setUploadedBy(entity.getUploadedBy());
+        vo.setUploadedAt(entity.getUploadedAt());
+        return vo;
+    }
+
+    private TaskPrestudyNotificationVO toPrestudyNotification(TaskVO task) {
+        TaskPrestudyNotificationVO vo = new TaskPrestudyNotificationVO();
+        vo.setTaskId(task.getId());
+        vo.setTaskTitle(task.getTitle());
+        vo.setPrestudyId(task.getPrestudyId());
+        vo.setPrestudyTitle(task.getPrestudyTitle());
+        vo.setPrestudyDescription(task.getPrestudyDescription());
+        vo.setPrestudyVersion(task.getPrestudyVersion());
+        vo.setPrestudyPublishedAt(task.getPrestudyPublishedAt());
+        vo.setPrestudyAttachments(task.getPrestudyAttachments() == null ? List.of() : task.getPrestudyAttachments());
+        return vo;
+    }
+
+    private TaskPrestudyEntity requirePrestudy(Long taskId) {
+        TaskPrestudyEntity prestudy = taskPrestudyMapper.findByTaskId(taskId);
+        if (prestudy == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "预习内容不存在");
+        }
+        return prestudy;
+    }
+
+    private TaskPrestudyEntity createOrUpdatePrestudyEntity(Long taskId, String title, String description, boolean initialCreate) {
+        String normalizedTitle = trimToNull(title);
+        if (normalizedTitle == null) {
+            throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "预习标题不能为空");
+        }
+        TaskPrestudyEntity existing = taskPrestudyMapper.findByTaskId(taskId);
+        LocalDateTime now = LocalDateTime.now();
+        if (existing == null) {
+            TaskPrestudyEntity entity = new TaskPrestudyEntity();
+            entity.setTaskId(taskId);
+            entity.setTitle(normalizedTitle);
+            entity.setDescription(description);
+            entity.setVersion(1);
+            entity.setPublishedAt(now);
+            entity.setUpdatedAt(now);
+            taskPrestudyMapper.insert(entity);
+            return entity;
+        }
+        existing.setTitle(normalizedTitle);
+        existing.setDescription(description);
+        existing.setVersion(initialCreate ? nvl(existing.getVersion()) : nvl(existing.getVersion()) + 1);
+        existing.setUpdatedAt(now);
+        taskPrestudyMapper.updateById(existing);
+        return existing;
+    }
+
+    private void bumpPrestudyVersion(TaskPrestudyEntity prestudy) {
+        if (prestudy == null) {
+            return;
+        }
+        TaskPrestudyEntity latest = taskPrestudyMapper.selectById(prestudy.getId());
+        if (latest == null) {
+            return;
+        }
+        latest.setVersion(nvl(latest.getVersion()) + 1);
+        latest.setUpdatedAt(LocalDateTime.now());
+        taskPrestudyMapper.updateById(latest);
+    }
+
+    private void replaceTaskTargetClasses(Long taskId, List<Long> classIds) {
+        taskTargetClassMapper.delete(new LambdaQueryWrapper<ExpTaskTargetClassEntity>()
+                .eq(ExpTaskTargetClassEntity::getTaskId, taskId));
+        if (classIds == null || classIds.isEmpty()) {
+            return;
+        }
+        Set<Long> uniq = classIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+        LocalDateTime now = LocalDateTime.now();
+        for (Long classId : uniq) {
+            ExpTaskTargetClassEntity tc = new ExpTaskTargetClassEntity();
+            tc.setTaskId(taskId);
+            tc.setClassId(classId);
+            tc.setCreatedAt(now);
+            taskTargetClassMapper.insert(tc);
+        }
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private int nvl(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private void validateExperimentCourseBinding(AuthenticatedUser actor, Long experimentCourseId) {

@@ -232,6 +232,48 @@ public class ExperimentFlowService {
         );
     }
 
+    public byte[] exportTaskProgressCompletionExcel(Long taskId, AuthenticatedUser teacher) {
+        ensureTeacherCanManageTask(taskId, teacher);
+        ExpTaskEntity task = requireTask(taskId);
+        List<List<?>> unfinishedRows = new ArrayList<>();
+        List<List<?>> confirmedRows = new ArrayList<>();
+        for (TeacherTaskProgressStudentVO student : listTeacherTaskProgress(taskId, teacher, null)) {
+            if (COMPLETION_CONFIRMED.equals(student.completionStatus())) {
+                confirmedRows.add(row(
+                        student.studentDisplayName(),
+                        student.studentUsername(),
+                        student.classDisplayName(),
+                        student.progressCount(),
+                        completionSourceText(student.completionSource()),
+                        student.latestUpdatedAt(),
+                        student.confirmedAt()
+                ));
+            } else {
+                unfinishedRows.add(row(
+                        student.studentDisplayName(),
+                        student.studentUsername(),
+                        student.classDisplayName(),
+                        student.progressCount(),
+                        completionStatusText(student.completionStatus()),
+                        student.latestUpdatedAt(),
+                        student.requestedAt()
+                ));
+            }
+        }
+        return excelExportService.writeWorkbook(List.of(
+                new ExcelExportService.SheetSpec(
+                        "未确认完成名单",
+                        List.of("学生姓名", "用户名", "班级", "进度条数", "登记状态", "最近更新时间", "申请登记时间"),
+                        unfinishedRows
+                ),
+                new ExcelExportService.SheetSpec(
+                        "已确认完成名单",
+                        List.of("学生姓名", "用户名", "班级", "进度条数", "完成来源", "最近更新时间", "确认时间"),
+                        confirmedRows
+                )
+        ));
+    }
+
     @Transactional
     public TaskCompletionVO confirmCompletion(Long taskId, Long studentId, AuthenticatedUser teacher) {
         ensureTeacherCanManageTask(taskId, teacher);
@@ -615,6 +657,18 @@ public class ExperimentFlowService {
         if (COMPLETION_SOURCE_STUDENT_REQUEST.equals(source)) return COMPLETION_SOURCE_STUDENT_REQUEST;
         if (COMPLETION_SOURCE_TEACHER_DIRECT.equals(source)) return COMPLETION_SOURCE_TEACHER_DIRECT;
         return allowTeacherDirectFallback ? COMPLETION_SOURCE_TEACHER_DIRECT : COMPLETION_SOURCE_STUDENT_REQUEST;
+    }
+
+    private String completionStatusText(String status) {
+        if (COMPLETION_CONFIRMED.equals(status)) return "已确认";
+        if (COMPLETION_PENDING.equals(status)) return "待确认";
+        return "未登记";
+    }
+
+    private String completionSourceText(String source) {
+        if (COMPLETION_SOURCE_TEACHER_DIRECT.equals(source)) return "教师直接登记完成";
+        if (COMPLETION_SOURCE_STUDENT_REQUEST.equals(source)) return "学生申请完成";
+        return "未登记";
     }
 
     private List<TaskDeviceConfigVO> buildTaskDeviceConfigs(Long taskId, boolean studentOnlyConfigured) {

@@ -23,7 +23,15 @@ type TaskVO = {
   deadlineAt?: string | null
   status?: string
   createdAt?: string
+  classIds?: number[]
   attachments?: TaskAttachmentVO[]
+  prestudyId?: number | null
+  prestudyTitle?: string | null
+  prestudyDescription?: string | null
+  prestudyVersion?: number | null
+  prestudyPublishedAt?: string | null
+  prestudyUnread?: boolean
+  prestudyAttachments?: TaskPrestudyAttachmentVO[]
 }
 
 type TaskAttachmentVO = {
@@ -34,6 +42,16 @@ type TaskAttachmentVO = {
   contentType?: string | null
   uploadedAt: string
   uploadedBy?: number | null
+}
+
+type TaskPrestudyAttachmentVO = {
+  id: number
+  prestudyId: number
+  fileName: string
+  fileSize: number
+  contentType?: string | null
+  uploadedBy?: number | null
+  uploadedAt?: string | null
 }
 
 type SubmissionVO = {
@@ -391,14 +409,28 @@ const createForm = reactive({
   deadlineAt: null as string | null,
   experimentCourseId: null as number | null,
   classIds: [] as number[],
+  prestudyEnabled: false,
+  prestudyTitle: '',
+  prestudyDescription: '',
 })
 const editTaskForm = reactive({
   title: '',
+  description: '',
+  deadlineAt: null as string | null,
+  experimentCourseId: null as number | null,
+  classIds: [] as number[],
+  prestudyTitle: '',
+  prestudyDescription: '',
 })
 const createTaskFiles = ref<File[]>([])
 const createTaskFileInput = ref<HTMLInputElement | null>(null)
+const createPrestudyFiles = ref<File[]>([])
+const createPrestudyFileInput = ref<HTMLInputElement | null>(null)
+const editPrestudyFiles = ref<File[]>([])
+const editPrestudyFileInput = ref<HTMLInputElement | null>(null)
 const creating = ref(false)
 const updatingTaskTitle = ref(false)
+const savingTaskEdit = ref(false)
 const classScope = ref<'mine' | 'all'>('mine')
 const classOptions = ref<TeacherClassVO[]>([])
 const loadingClasses = ref(false)
@@ -1168,6 +1200,19 @@ async function exportDeviceRequestsExcel() {
   }
 }
 
+async function exportProgressCompletionExcel() {
+  if (!selectedTaskId.value) return
+  try {
+    await downloadBlob(`/api/teacher/tasks/${selectedTaskId.value}/progress/export/excel`, {
+      token: auth.token,
+      fallbackFilename: `task-${selectedTaskId.value}-progress-completion.xlsx`,
+    })
+    ElMessage.success('已开始下载完成登记 Excel')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '导出失败')
+  }
+}
+
 async function previewProgressAttachment(row: ProgressAttachmentVO) {
   try {
     closePreview()
@@ -1221,8 +1266,14 @@ async function downloadProgressAttachment(row: ProgressAttachmentVO) {
 }
 
 async function createTask() {
-  if (!createForm.title.trim()) {
-    ElMessage.warning('请输入标题')
+  const title = createForm.title.trim()
+  const prestudyTitle = createForm.prestudyTitle.trim()
+  if (!title && !prestudyTitle) {
+    ElMessage.warning('任务标题和预习标题至少填写一个')
+    return
+  }
+  if (createPrestudyFiles.value.length > 0 && !prestudyTitle) {
+    ElMessage.warning('上传预习附件前请先填写预习标题')
     return
   }
   creating.value = true
@@ -1232,11 +1283,13 @@ async function createTask() {
       {
         method: 'POST',
         body: {
-          title: createForm.title,
+          title,
           description: createForm.description,
           deadlineAt: createForm.deadlineAt,
           experimentCourseId: createForm.experimentCourseId,
           classIds: createForm.classIds,
+          prestudyTitle: createForm.prestudyEnabled || prestudyTitle ? prestudyTitle : null,
+          prestudyDescription: createForm.prestudyEnabled || prestudyTitle ? createForm.prestudyDescription : null,
         },
       },
       auth.token,
@@ -1246,6 +1299,11 @@ async function createTask() {
       for (const file of createTaskFiles.value) fd.append('files', file)
       await uploadFormData(`/api/tasks/${created.id}/attachments`, { token: auth.token, formData: fd })
     }
+    if (createPrestudyFiles.value.length > 0) {
+      const fd = new FormData()
+      for (const file of createPrestudyFiles.value) fd.append('files', file)
+      await uploadFormData(`/api/tasks/${created.id}/prestudy/attachments`, { token: auth.token, formData: fd })
+    }
     ElMessage.success('任务创建成功')
     createDialog.value = false
     createForm.title = ''
@@ -1253,8 +1311,13 @@ async function createTask() {
     createForm.deadlineAt = null
     createForm.experimentCourseId = null
     createForm.classIds = []
+    createForm.prestudyEnabled = false
+    createForm.prestudyTitle = ''
+    createForm.prestudyDescription = ''
     createTaskFiles.value = []
+    createPrestudyFiles.value = []
     if (createTaskFileInput.value) createTaskFileInput.value.value = ''
+    if (createPrestudyFileInput.value) createPrestudyFileInput.value.value = ''
     await loadTasks()
     await selectTask(created.id)
   } catch (e: any) {
@@ -1268,6 +1331,18 @@ function onPickCreateTaskFiles(ev: Event) {
   const input = ev.target as HTMLInputElement
   createTaskFiles.value = Array.from(input.files ?? [])
   createTaskFileInput.value = input
+}
+
+function onPickCreatePrestudyFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  createPrestudyFiles.value = Array.from(input.files ?? [])
+  createPrestudyFileInput.value = input
+}
+
+function onPickEditPrestudyFiles(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  editPrestudyFiles.value = Array.from(input.files ?? [])
+  editPrestudyFileInput.value = input
 }
 
 function onPickTaskAttachmentFiles(ev: Event) {
@@ -2283,33 +2358,122 @@ async function deleteTask() {
   }
 }
 
-function openEditTaskDialog() {
+async function uploadEditPrestudyAttachments(taskId: number) {
+  if (editPrestudyFiles.value.length === 0) return
+  const fd = new FormData()
+  for (const file of editPrestudyFiles.value) fd.append('files', file)
+  const updated = await uploadFormData<TaskPrestudyAttachmentVO[]>(`/api/tasks/${taskId}/prestudy/attachments`, {
+    token: auth.token,
+    formData: fd,
+  })
+  if (taskDetail.value) taskDetail.value.prestudyAttachments = updated
+  editPrestudyFiles.value = []
+  if (editPrestudyFileInput.value) editPrestudyFileInput.value.value = ''
+}
+
+async function deletePrestudyAttachment(row: TaskPrestudyAttachmentVO) {
+  if (!selectedTaskId.value) return
+  try {
+    await ElMessageBox.confirm(`确定删除预习附件《${row.fileName}》？`, '删除预习附件', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    const updated = await apiData<TaskPrestudyAttachmentVO[]>(
+      `/api/tasks/${selectedTaskId.value}/prestudy/attachments/${row.id}`,
+      { method: 'DELETE' },
+      auth.token,
+    )
+    if (taskDetail.value) {
+      taskDetail.value.prestudyAttachments = updated
+      taskDetail.value.prestudyVersion = (taskDetail.value.prestudyVersion ?? 0) + 1
+    }
+    ElMessage.success('预习附件已删除')
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '删除预习附件失败')
+  }
+}
+
+async function downloadPrestudyAttachment(row: TaskPrestudyAttachmentVO) {
+  if (!selectedTaskId.value) return
+  try {
+    await downloadBlob(`/api/tasks/${selectedTaskId.value}/prestudy/attachments/${row.id}/download`, {
+      token: auth.token,
+      fallbackFilename: row.fileName || `prestudy-attachment-${row.id}`,
+    })
+  } catch (e: any) {
+    ElMessage.error(e?.message ?? '下载失败')
+  }
+}
+
+async function openEditTaskDialog() {
   if (!taskDetail.value) return
+  classScope.value = 'all'
+  await loadClassOptions()
   editTaskForm.title = taskDetail.value.title || ''
+  editTaskForm.description = taskDetail.value.description || ''
+  editTaskForm.deadlineAt = taskDetail.value.deadlineAt || null
+  editTaskForm.experimentCourseId = taskDetail.value.experimentCourseId ?? null
+  editTaskForm.classIds = [...(taskDetail.value.classIds || [])]
+  editTaskForm.prestudyTitle = taskDetail.value.prestudyTitle || ''
+  editTaskForm.prestudyDescription = taskDetail.value.prestudyDescription || ''
+  editPrestudyFiles.value = []
+  if (editPrestudyFileInput.value) editPrestudyFileInput.value.value = ''
   editTaskDialog.value = true
 }
 
 async function updateTaskTitle() {
   if (!taskDetail.value) return
-  if (!editTaskForm.title.trim()) {
-    ElMessage.warning('请输入任务名')
+  const title = editTaskForm.title.trim()
+  const prestudyTitle = editTaskForm.prestudyTitle.trim()
+  if (!title && !prestudyTitle) {
+    ElMessage.warning('任务标题和预习标题至少填写一个')
     return
   }
   updatingTaskTitle.value = true
+  savingTaskEdit.value = true
   try {
     const updated = await apiData<TaskVO>(
-      `/api/tasks/${taskDetail.value.id}/title`,
-      { method: 'PUT', body: { title: editTaskForm.title.trim() } },
+      `/api/tasks/${taskDetail.value.id}`,
+      {
+        method: 'PUT',
+        body: {
+          title,
+          description: editTaskForm.description,
+          deadlineAt: editTaskForm.deadlineAt,
+          experimentCourseId: editTaskForm.experimentCourseId,
+          classIds: editTaskForm.classIds,
+        },
+      },
       auth.token,
     )
     taskDetail.value = updated
+    if (prestudyTitle) {
+      taskDetail.value = await apiData<TaskVO>(
+        `/api/tasks/${updated.id}/prestudy`,
+        { method: 'PUT', body: { title: prestudyTitle, description: editTaskForm.prestudyDescription } },
+        auth.token,
+      )
+    }
+    if (editPrestudyFiles.value.length > 0) {
+      if (!prestudyTitle && !taskDetail.value?.prestudyTitle) {
+        throw new Error('请先填写预习标题')
+      }
+      await uploadEditPrestudyAttachments(updated.id)
+      taskDetail.value = await apiData<TaskVO>(`/api/tasks/${updated.id}`, { method: 'GET' }, auth.token)
+    }
     await loadTasks()
     editTaskDialog.value = false
-    ElMessage.success('任务名已更新')
+    ElMessage.success('任务与预习内容已更新')
   } catch (e: any) {
-    ElMessage.error(e?.message ?? '更新任务名失败')
+    ElMessage.error(e?.message ?? '更新任务失败')
   } finally {
     updatingTaskTitle.value = false
+    savingTaskEdit.value = false
   }
 }
 
@@ -3231,12 +3395,29 @@ async function copyLink() {
                   </div>
                   <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
                     <div class="meta">截止：{{ taskDetail.deadlineAt || '-' }}</div>
-                    <el-button size="small" @click="openEditTaskDialog">修改任务名</el-button>
+                    <el-button size="small" @click="openEditTaskDialog">任务/预习内容</el-button>
                     <el-button size="small" type="danger" plain @click="deleteTask">删除任务</el-button>
                   </div>
                 </div>
               </template>
               <div style="white-space: pre-wrap">{{ taskDetail.description || '（无说明）' }}</div>
+              <el-card v-if="taskDetail.prestudyTitle" shadow="never" class="innerCard" style="margin-top: 14px">
+                <template #header>
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap">
+                    <div>预习内容</div>
+                    <el-tag size="small" type="warning">版本 {{ taskDetail.prestudyVersion || 1 }}</el-tag>
+                  </div>
+                </template>
+                <div class="progressTitle">{{ taskDetail.prestudyTitle }}</div>
+                <div class="meta" style="margin-top: 8px; white-space: pre-wrap">{{ taskDetail.prestudyDescription || '（无说明）' }}</div>
+                <div v-if="(taskDetail.prestudyAttachments || []).length > 0" class="progressAtts">
+                  <div v-for="att in taskDetail.prestudyAttachments || []" :key="att.id" class="progressAtt">
+                    <div class="attName">{{ att.fileName }}</div>
+                    <div class="meta">大小：{{ att.fileSize }} Byte</div>
+                    <el-button size="small" style="margin-top: 8px" @click="downloadPrestudyAttachment(att)">下载</el-button>
+                  </div>
+                </div>
+              </el-card>
               <div style="margin-top: 14px">
                 <div class="meta" style="margin-bottom: 8px">任务附件/资料</div>
                 <template v-if="!isMobile">
@@ -3292,6 +3473,7 @@ async function copyLink() {
                   <el-input v-model="progressStudentQ" clearable placeholder="搜索学生姓名/账号" style="width: 280px" />
                   <el-button type="primary" :loading="loadingProgressStudents" @click="loadProgressStudents">查询</el-button>
                   <el-button :loading="loadingProgressStudents" @click="loadProgressStudents">刷新</el-button>
+                  <el-button type="primary" plain @click="exportProgressCompletionExcel">导出 Excel</el-button>
                 </div>
 
                 <template v-if="!isMobile">
@@ -3499,7 +3681,7 @@ async function copyLink() {
                   </div>
                   <div>
                     <el-button size="small" @click="loadSubmissions" :loading="loadingSubs">刷新提交</el-button>
-                    <el-button size="small" @click="openEditTaskDialog">修改任务名</el-button>
+                    <el-button size="small" @click="openEditTaskDialog">任务/预习内容</el-button>
                     <el-button type="primary" size="small" @click="exportCsv">导出 CSV</el-button>
                     <el-button type="primary" plain size="small" @click="exportExcel">导出 Excel</el-button>
                     <el-button type="danger" plain size="small" @click="deleteTask">删除任务</el-button>
@@ -3842,7 +4024,7 @@ async function copyLink() {
 
   <el-dialog v-model="createDialog" title="新建任务" width="560px">
     <el-form label-position="top">
-      <el-form-item label="标题">
+      <el-form-item label="标题（可选，若只发布预习可留空）">
         <el-input v-model="createForm.title" placeholder="例如：第1次实验报告" />
       </el-form-item>
       <el-form-item label="说明">
@@ -3914,6 +4096,24 @@ async function copyLink() {
           <div class="meta" v-else>支持一次选择多个任务资料文件，学生端可直接下载。</div>
         </div>
       </el-form-item>
+      <el-form-item label="下一次课预习">
+        <el-checkbox v-model="createForm.prestudyEnabled">发布预习内容</el-checkbox>
+      </el-form-item>
+      <template v-if="createForm.prestudyEnabled">
+        <el-form-item label="预习标题">
+          <el-input v-model="createForm.prestudyTitle" placeholder="例如：下次课预习：示波器基本操作" />
+        </el-form-item>
+        <el-form-item label="预习说明">
+          <el-input v-model="createForm.prestudyDescription" type="textarea" :rows="4" placeholder="填写预习要求、阅读内容或课堂准备事项" />
+        </el-form-item>
+        <el-form-item label="预习附件（可选）">
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%">
+            <input type="file" multiple @change="onPickCreatePrestudyFiles" />
+            <div class="meta" v-if="createPrestudyFiles.length > 0">已选择 {{ createPrestudyFiles.length }} 个预习附件。</div>
+            <div class="meta" v-else>学生收到预习提醒时可下载这些附件。</div>
+          </div>
+        </el-form-item>
+      </template>
     </el-form>
     <template #footer>
       <el-button @click="createDialog = false">取消</el-button>
@@ -3921,15 +4121,85 @@ async function copyLink() {
     </template>
   </el-dialog>
 
-  <el-dialog v-model="editTaskDialog" title="修改任务名" width="420px">
+  <el-dialog v-model="editTaskDialog" title="任务与预习内容" :width="isMobile ? '96vw' : '720px'">
     <el-form label-position="top">
-      <el-form-item label="任务名">
-        <el-input v-model="editTaskForm.title" placeholder="请输入新的任务名" />
+      <el-form-item label="任务标题（可选，若只发布预习可留空）">
+        <el-input v-model="editTaskForm.title" placeholder="请输入任务标题" />
+      </el-form-item>
+      <el-form-item label="任务说明">
+        <el-input v-model="editTaskForm.description" type="textarea" :rows="4" placeholder="任务要求/提交说明" />
+      </el-form-item>
+      <el-form-item label="截止时间（可选）">
+        <el-date-picker
+          v-model="editTaskForm.deadlineAt"
+          type="datetime"
+          placeholder="不设置则不限时"
+          style="width: 100%"
+          clearable
+          format="YYYY-MM-DD HH:mm:ss"
+          value-format="YYYY-MM-DDTHH:mm:ss"
+        />
+      </el-form-item>
+      <el-form-item label="关联实验课程（可选）">
+        <el-select v-model="editTaskForm.experimentCourseId" clearable filterable placeholder="选择已开的实验课程" style="width: 100%">
+          <el-option
+            v-for="course in experimentCourses.filter((item) => item.status === 'OPEN')"
+            :key="course.id"
+            :label="`${course.title}${course.semesterName ? ` / ${course.semesterName}` : ''}`"
+            :value="course.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="发布班级（不选 = 全体学生）">
+        <el-select
+          v-model="editTaskForm.classIds"
+          multiple
+          filterable
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          :loading="loadingClasses"
+          placeholder="选择班级（可多选）"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="c in classOptions"
+            :key="c.id"
+            :label="c.departmentName ? `${c.departmentName} / ${c.name}` : c.name"
+            :value="c.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-divider content-position="left">预习内容</el-divider>
+      <el-form-item label="预习标题">
+        <el-input v-model="editTaskForm.prestudyTitle" placeholder="填写后学生端会显示预习并收到提醒" />
+      </el-form-item>
+      <el-form-item label="预习说明">
+        <el-input v-model="editTaskForm.prestudyDescription" type="textarea" :rows="4" placeholder="填写预习要求、阅读内容或课堂准备事项" />
+      </el-form-item>
+      <el-form-item label="预习附件">
+        <div style="width: 100%">
+          <div v-if="!(taskDetail?.prestudyAttachments || []).length" class="meta">暂无预习附件</div>
+          <div v-else class="progressAtts">
+            <div v-for="att in taskDetail?.prestudyAttachments || []" :key="att.id" class="progressAtt">
+              <div class="attName">{{ att.fileName }}</div>
+              <div class="meta">大小：{{ att.fileSize }} Byte</div>
+              <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap">
+                <el-button size="small" @click="downloadPrestudyAttachment(att)">下载</el-button>
+                <el-button size="small" type="danger" @click="deletePrestudyAttachment(att)">删除</el-button>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px">
+            <input type="file" multiple @change="onPickEditPrestudyFiles" />
+            <div class="meta" v-if="editPrestudyFiles.length > 0">已选择 {{ editPrestudyFiles.length }} 个预习附件，保存时上传。</div>
+          </div>
+        </div>
       </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="editTaskDialog = false">取消</el-button>
-      <el-button type="primary" :loading="updatingTaskTitle" @click="updateTaskTitle">保存</el-button>
+      <el-button type="primary" :loading="savingTaskEdit || updatingTaskTitle" @click="updateTaskTitle">保存</el-button>
     </template>
   </el-dialog>
 
