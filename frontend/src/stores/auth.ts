@@ -6,6 +6,7 @@ export type UserProfile = {
   username: string
   displayName: string
   roles: string[]
+  mustChangePassword: boolean
 }
 
 type LoginResponse = {
@@ -70,7 +71,7 @@ export const useAuthStore = defineStore('auth', {
     },
     async ensureMe(): Promise<void> {
       if (!this.token) return
-      if (this.user) return
+      if (this.user && typeof this.user.mustChangePassword === 'boolean') return
       await this.fetchMe()
     },
     logout(): void {
@@ -81,4 +82,3 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 })
-

@@ -484,6 +484,83 @@ class AdminIntegrationTests {
                 .andExpect(jsonPath("$.message").value("同一院系下已存在相同年级和班级名称的记录"));
     }
 
+    @Test
+    void studentDefaultPasswordRequiresForceChangeAndIdentityMustMatch() throws Exception {
+        String adminToken = login("admin", "admin123");
+        String username = "force_" + Instant.now().toEpochMilli();
+        String displayName = "Force Student";
+
+        mockMvc.perform(post("/api/admin/users")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"%s",
+                                  "enabled":true,
+                                  "roleCodes":["ROLE_STUDENT"]
+                                }
+                                """.formatted(username, displayName)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        MvcResult loginResult = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user.mustChangePassword").value(true))
+                .andReturn();
+        String token = JsonPath.read(loginResult.getResponse().getContentAsString(), "$.data.token");
+
+        mockMvc.perform(post("/api/auth/force-change-password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"other_student",
+                                  "displayName":"Other Student",
+                                  "newPassword":"Changed123",
+                                  "confirmPassword":"Changed123"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("账号信息校验失败，请填写当前登录账号对应的学号和姓名"));
+
+        mockMvc.perform(post("/api/auth/force-change-password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"%s",
+                                  "newPassword":"123456",
+                                  "confirmPassword":"123456"
+                                }
+                                """.formatted(username, displayName)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("新密码不能使用默认密码"));
+
+        mockMvc.perform(post("/api/auth/force-change-password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "username":"%s",
+                                  "displayName":"%s",
+                                  "newPassword":"Changed123",
+                                  "confirmPassword":"Changed123"
+                                }
+                                """.formatted(username, displayName)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"" + username + "\",\"password\":\"Changed123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.user.mustChangePassword").value(false));
+    }
+
     private String login(String username, String password) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

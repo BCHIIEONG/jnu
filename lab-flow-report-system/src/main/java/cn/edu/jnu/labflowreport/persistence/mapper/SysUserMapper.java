@@ -9,7 +9,7 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface SysUserMapper extends BaseMapper<SysUserEntity> {
 
-    @Select("SELECT id, username, password_hash, display_name, enabled, created_at, updated_at FROM sys_user WHERE username = #{username} LIMIT 1")
+    @Select("SELECT id, username, password_hash, display_name, enabled, must_change_password, department_id, class_id, created_at, updated_at FROM sys_user WHERE username = #{username} LIMIT 1")
     SysUserEntity findByUsername(String username);
 
     @Select("""

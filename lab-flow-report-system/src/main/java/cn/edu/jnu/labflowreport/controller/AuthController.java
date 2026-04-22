@@ -1,6 +1,7 @@
 package cn.edu.jnu.labflowreport.controller;
 
 import cn.edu.jnu.labflowreport.auth.dto.CurrentUserResponse;
+import cn.edu.jnu.labflowreport.auth.dto.ForceChangePasswordRequest;
 import cn.edu.jnu.labflowreport.auth.dto.LoginRequest;
 import cn.edu.jnu.labflowreport.auth.dto.LoginResponse;
 import cn.edu.jnu.labflowreport.auth.service.AuthService;
@@ -32,9 +33,14 @@ public class AuthController {
         return ApiResponse.success(authService.me());
     }
 
+    @PostMapping("/force-change-password")
+    public ApiResponse<Void> forceChangePassword(@Valid @RequestBody ForceChangePasswordRequest request) {
+        authService.forceChangePassword(request);
+        return ApiResponse.success("密码修改成功，请重新登录", null);
+    }
+
     @PostMapping("/logout")
     public ApiResponse<Void> logout() {
         return ApiResponse.success("登出成功", null);
     }
 }
-

@@ -16,6 +16,7 @@ public class SysUserEntity {
     private String passwordHash;
     private String displayName;
     private Boolean enabled;
+    private Boolean mustChangePassword;
     private Long departmentId;
     private Long classId;
     private LocalDateTime createdAt;

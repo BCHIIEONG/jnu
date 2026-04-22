@@ -181,7 +181,9 @@ public class AdminUserService {
         List<String> normalizedRoleCodes = normalizeRoleCodes(request.roleCodes());
         validateRoleCombination(normalizedRoleCodes);
         entity.setClassId(resolveSingleClassId(normalizedRoleCodes, request.classId()));
-        entity.setPasswordHash(passwordEncoder.encode(StringUtils.hasText(request.password()) ? request.password() : DEFAULT_PASSWORD));
+        String rawPassword = normalizePasswordOrDefault(request.password());
+        entity.setPasswordHash(passwordEncoder.encode(rawPassword));
+        entity.setMustChangePassword(shouldForcePasswordChange(normalizedRoleCodes, rawPassword));
         entity.setCreatedAt(LocalDateTime.now());
         entity.setUpdatedAt(LocalDateTime.now());
         sysUserMapper.insert(entity);
@@ -273,10 +275,12 @@ public class AdminUserService {
         if (existing == null) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.NOT_FOUND, "用户不存在");
         }
-        String pw = StringUtils.hasText(newPassword) ? newPassword : DEFAULT_PASSWORD;
+        List<String> roleCodes = normalizeRoleCodes(sysUserMapper.findRoleCodesByUserId(userId));
+        String pw = normalizePasswordOrDefault(newPassword);
         sysUserMapper.update(null, new LambdaUpdateWrapper<SysUserEntity>()
                 .eq(SysUserEntity::getId, userId)
                 .set(SysUserEntity::getPasswordHash, passwordEncoder.encode(pw))
+                .set(SysUserEntity::getMustChangePassword, shouldForcePasswordChange(roleCodes, pw))
                 .set(SysUserEntity::getUpdatedAt, LocalDateTime.now()));
         adminAuditService.record(actor, AdminAuditActions.USER_RESET_PASSWORD, "sys_user", userId, Map.of("username", existing.getUsername()));
     }
@@ -290,6 +294,12 @@ public class AdminUserService {
         List<String> normalizedRoleCodes = normalizeRoleCodes(roleCodes);
         validateRoleCombination(normalizedRoleCodes);
         setUserRolesInternal(userId, normalizedRoleCodes);
+        if (!isStudentOnly(normalizedRoleCodes)) {
+            sysUserMapper.update(null, new LambdaUpdateWrapper<SysUserEntity>()
+                    .eq(SysUserEntity::getId, userId)
+                    .set(SysUserEntity::getMustChangePassword, false)
+                    .set(SysUserEntity::getUpdatedAt, LocalDateTime.now()));
+        }
         adminAuditService.record(actor, AdminAuditActions.USER_SET_ROLES, "sys_user", userId, Map.of(
                 "username", existing.getUsername(),
                 "roleCodes", normalizedRoleCodes
@@ -409,7 +419,11 @@ public class AdminUserService {
                             upd.set(SysUserEntity::getClassId, classId);
                         }
                         if (StringUtils.hasText(password)) {
-                            upd.set(SysUserEntity::getPasswordHash, passwordEncoder.encode(password));
+                            String rawPassword = normalizePasswordOrDefault(password);
+                            upd.set(SysUserEntity::getPasswordHash, passwordEncoder.encode(rawPassword));
+                            upd.set(SysUserEntity::getMustChangePassword, shouldForcePasswordChange(normalizedRoleCodes, rawPassword));
+                        } else if (!isStudentOnly(normalizedRoleCodes)) {
+                            upd.set(SysUserEntity::getMustChangePassword, false);
                         }
                         sysUserMapper.update(null, upd);
                         setUserRolesInternal(existing.getId(), normalizedRoleCodes);
@@ -605,6 +619,21 @@ public class AdminUserService {
         if (roleCodes.contains("ROLE_TEACHER") && roleCodes.contains("ROLE_STUDENT")) {
             throw new BusinessException(ApiCode.BAD_REQUEST, HttpStatus.BAD_REQUEST, "暂不支持同时拥有教师和学生角色");
         }
+    }
+
+    private static String normalizePasswordOrDefault(String password) {
+        return StringUtils.hasText(password) ? password.trim() : DEFAULT_PASSWORD;
+    }
+
+    private static boolean shouldForcePasswordChange(List<String> roleCodes, String rawPassword) {
+        return isStudentOnly(roleCodes) && DEFAULT_PASSWORD.equals(rawPassword);
+    }
+
+    private static boolean isStudentOnly(List<String> roleCodes) {
+        return roleCodes != null
+                && roleCodes.contains("ROLE_STUDENT")
+                && !roleCodes.contains("ROLE_TEACHER")
+                && !roleCodes.contains("ROLE_ADMIN");
     }
 
     private static List<Long> normalizeClassIds(List<Long> classIds, Long classId) {

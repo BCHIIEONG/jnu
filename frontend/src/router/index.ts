@@ -52,6 +52,10 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
 
+  if (auth.user?.mustChangePassword) {
+    return { path: '/login', query: { forceChange: '1', redirect: to.fullPath } }
+  }
+
   const requiredRoles = to.meta.roles
   if (requiredRoles && requiredRoles.length > 0) {
     const ok = requiredRoles.some((r) => auth.hasRole(r))

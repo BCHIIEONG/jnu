@@ -6,7 +6,7 @@ public record UserProfile(
         Long id,
         String username,
         String displayName,
-        List<String> roles
+        List<String> roles,
+        Boolean mustChangePassword
 ) {
 }
-
