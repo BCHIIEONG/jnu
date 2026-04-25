@@ -57,18 +57,6 @@ async function load() {
   }
 }
 
-async function exportCsv() {
-  try {
-    await downloadBlob(`/api/admin/audit-logs/export?${buildQuery(false)}`, {
-      token: token.value,
-      fallbackFilename: 'audit-logs.csv',
-    })
-    ElMessage.success('已下载 audit-logs.csv')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportExcel() {
   try {
     await downloadBlob(`/api/admin/audit-logs/export/excel?${buildQuery(false)}`, {
@@ -107,7 +95,6 @@ onMounted(load)
         clearable
       />
       <el-button type="primary" :loading="loading" @click="() => { query.page = 1; load() }">查询</el-button>
-      <el-button @click="exportCsv">导出 CSV</el-button>
       <el-button type="primary" plain @click="exportExcel">导出 Excel</el-button>
     </div>
 

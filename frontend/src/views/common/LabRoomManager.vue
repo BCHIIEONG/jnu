@@ -24,8 +24,6 @@ type LabRoom = {
 
 const props = defineProps<{
   apiBase: string
-  exportPath?: string
-  exportFilename?: string
   exportExcelPath?: string
   exportExcelFilename?: string
 }>()
@@ -150,19 +148,6 @@ async function removeRoom(row: LabRoom) {
   }
 }
 
-async function exportCsv() {
-  if (!props.exportPath) return
-  try {
-    await downloadBlob(props.exportPath, {
-      token: token.value,
-      fallbackFilename: props.exportFilename || 'lab-rooms.csv',
-    })
-    ElMessage.success('实验室 CSV 已下载')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportExcel() {
   if (!props.exportExcelPath) return
   try {
@@ -187,7 +172,6 @@ onMounted(load)
   <div class="panel">
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建实验室</el-button>
-      <el-button v-if="exportPath" @click="exportCsv">导出 CSV</el-button>
       <el-button v-if="exportExcelPath" type="primary" plain @click="exportExcel">导出 Excel</el-button>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>

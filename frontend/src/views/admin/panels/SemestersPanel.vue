@@ -102,15 +102,6 @@ async function del(s: Semester) {
   }
 }
 
-async function exportCsv() {
-  try {
-    await downloadBlob('/api/admin/semesters/export', { token: token.value, fallbackFilename: 'semesters.csv' })
-    ElMessage.success('已下载 semesters.csv')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportExcel() {
   try {
     await downloadBlob('/api/admin/semesters/export/excel', { token: token.value, fallbackFilename: 'semesters.xlsx' })
@@ -127,7 +118,6 @@ onMounted(load)
   <div class="panel">
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建学期</el-button>
-      <el-button @click="exportCsv">导出 CSV</el-button>
       <el-button type="primary" plain @click="exportExcel">导出 Excel</el-button>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>

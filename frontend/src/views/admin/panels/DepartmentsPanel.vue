@@ -70,15 +70,6 @@ async function del(d: Department) {
   }
 }
 
-async function exportCsv() {
-  try {
-    await downloadBlob('/api/admin/departments/export', { token: token.value, fallbackFilename: 'departments.csv' })
-    ElMessage.success('已下载 departments.csv')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportExcel() {
   try {
     await downloadBlob('/api/admin/departments/export/excel', { token: token.value, fallbackFilename: 'departments.xlsx' })
@@ -95,7 +86,6 @@ onMounted(load)
   <div class="panel">
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建院系</el-button>
-      <el-button @click="exportCsv">导出 CSV</el-button>
       <el-button type="primary" plain @click="exportExcel">导出 Excel</el-button>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>

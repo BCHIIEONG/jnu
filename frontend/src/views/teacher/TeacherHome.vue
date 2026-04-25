@@ -1174,19 +1174,6 @@ async function changeDeviceRequestStatus(
   }
 }
 
-async function exportDeviceRequests() {
-  if (!selectedTaskId.value) return
-  try {
-    await downloadBlob(`/api/teacher/tasks/${selectedTaskId.value}/device-requests/export`, {
-      token: auth.token,
-      fallbackFilename: `task-${selectedTaskId.value}-device-requests.csv`,
-    })
-    ElMessage.success('已开始下载借用记录 CSV')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportDeviceRequestsExcel() {
   if (!selectedTaskId.value) return
   try {
@@ -2092,18 +2079,6 @@ async function openHistoryDetail(row: AttendanceHistoryItem) {
   }
 }
 
-async function exportHistoryAttendanceCsv(sessionId: number) {
-  try {
-    await downloadBlob(`/api/attendance/sessions/${sessionId}/export`, {
-      token: auth.token,
-      fallbackFilename: `attendance-session-${sessionId}.csv`,
-    })
-    ElMessage.success('已开始下载签到 CSV')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportHistoryAttendanceExcel(sessionId: number) {
   try {
     await downloadBlob(`/api/attendance/sessions/${sessionId}/export/excel`, {
@@ -2274,19 +2249,6 @@ async function submitReview() {
     ElMessage.error(e?.message ?? '批阅失败')
   } finally {
     reviewing.value = false
-  }
-}
-
-async function exportCsv() {
-  if (!selectedTaskId.value) return
-  try {
-    await downloadBlob(`/api/tasks/${selectedTaskId.value}/scores/export`, {
-      token: auth.token,
-      fallbackFilename: `task-${selectedTaskId.value}-scores.csv`,
-    })
-    ElMessage.success('已开始下载 CSV')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
   }
 }
 
@@ -2899,19 +2861,6 @@ async function manualCheckin(studentId: number) {
     await refreshRecords()
   } catch (e: any) {
     ElMessage.error(e?.message ?? '补签失败')
-  }
-}
-
-async function exportAttendanceCsv() {
-  if (!session.value) return
-  try {
-    await downloadBlob(`/api/attendance/sessions/${session.value.id}/export`, {
-      token: auth.token,
-      fallbackFilename: `attendance-session-${session.value.id}.csv`,
-    })
-    ElMessage.success('已开始下载 CSV')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
   }
 }
 
@@ -3573,7 +3522,6 @@ async function copyLink() {
               <template v-else>
                 <div class="toolbar" style="margin-bottom: 12px">
                   <el-button type="primary" @click="openDeviceConfigDialog">任务设备配置</el-button>
-                  <el-button @click="exportDeviceRequests">导出 CSV</el-button>
                   <el-button type="primary" plain @click="exportDeviceRequestsExcel">导出 Excel</el-button>
                   <el-input v-model="deviceRequestQ" clearable placeholder="搜索学生姓名/账号" style="width: 240px" />
                   <el-select v-model="deviceRequestStatus" clearable placeholder="状态" style="width: 160px">
@@ -3690,7 +3638,6 @@ async function copyLink() {
                   <div>
                     <el-button size="small" @click="loadSubmissions" :loading="loadingSubs">刷新提交</el-button>
                     <el-button size="small" @click="openEditTaskDialog">任务/预习内容</el-button>
-                    <el-button type="primary" size="small" @click="exportCsv">导出 CSV</el-button>
                     <el-button type="primary" plain size="small" @click="exportExcel">导出 Excel</el-button>
                     <el-button type="danger" plain size="small" @click="deleteTask">删除任务</el-button>
                     <el-button
@@ -3984,7 +3931,6 @@ async function copyLink() {
                   <el-table-column label="操作" width="200" fixed="right">
                     <template #default="{ row }: { row: AttendanceHistoryItem }">
                       <el-button size="small" @click="openHistoryDetail(row)">查看详情</el-button>
-                      <el-button size="small" @click="exportHistoryAttendanceCsv(row.sessionId)">导出 CSV</el-button>
                       <el-button size="small" type="primary" plain @click="exportHistoryAttendanceExcel(row.sessionId)">导出 Excel</el-button>
                     </template>
                   </el-table-column>
@@ -4007,7 +3953,6 @@ async function copyLink() {
                   <div class="meta">统计：已到 {{ row.checkedInCount }} / 应到 {{ row.totalCount }} / 未到 {{ row.absentCount }}</div>
                   <div class="stuActions">
                     <el-button size="small" @click="openHistoryDetail(row)">查看详情</el-button>
-                    <el-button size="small" @click="exportHistoryAttendanceCsv(row.sessionId)">导出 CSV</el-button>
                     <el-button size="small" type="primary" plain @click="exportHistoryAttendanceExcel(row.sessionId)">导出 Excel</el-button>
                   </div>
                 </el-card>
@@ -4617,7 +4562,6 @@ async function copyLink() {
         <span v-if="qrMode === 'dynamic'" class="meta">秒刷新</span>
 
         <el-button size="small" @click="copyLink" :disabled="!checkinLink">复制签到链接</el-button>
-        <el-button size="small" @click="exportAttendanceCsv" :disabled="!session">导出签到 CSV</el-button>
         <el-button size="small" type="primary" plain @click="exportAttendanceExcel" :disabled="!session">导出签到 Excel</el-button>
         <el-button size="small" type="primary" @click="startSession" :disabled="!!session">开启签到</el-button>
         <el-button size="small" type="danger" @click="closeSession" :disabled="!session">结束签到</el-button>

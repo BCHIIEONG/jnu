@@ -313,15 +313,6 @@ async function deleteUser(u: UserItem) {
   }
 }
 
-async function exportUsers() {
-  try {
-    await downloadBlob('/api/admin/users/export', { token: token.value, fallbackFilename: 'users.csv' })
-    ElMessage.success('已下载 users.csv')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportUsersExcel() {
   try {
     await downloadBlob('/api/admin/users/export/excel', { token: token.value, fallbackFilename: 'users.xlsx' })
@@ -393,7 +384,6 @@ onMounted(async () => {
       </el-select>
       <el-button type="primary" :loading="loading" @click="() => { query.page = 1; loadUsers() }">查询</el-button>
       <el-button :loading="metaLoading" @click="openCreate">新建</el-button>
-      <el-button @click="exportUsers">导出 CSV</el-button>
       <el-button type="primary" plain @click="exportUsersExcel">导出 Excel</el-button>
     </div>
 

@@ -129,19 +129,6 @@ async function loadDashboard() {
   }
 }
 
-async function exportCsv(path: string, fallbackFilename: string) {
-  try {
-    const suffix = buildQueryString()
-    await downloadBlob(`${path}${suffix ? `?${suffix}` : ''}`, {
-      token: auth.token,
-      fallbackFilename,
-    })
-    ElMessage.success('导出成功')
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导出失败')
-  }
-}
-
 async function exportExcel(path: string, fallbackFilename: string) {
   try {
     const suffix = buildQueryString()
@@ -202,7 +189,6 @@ onMounted(async () => {
         <div class="sectionHeader">
           <span>任务统计</span>
           <div class="filterActions">
-            <el-button size="small" @click="exportCsv('/api/teacher/statistics/reports/tasks/export', 'teacher-task-stats.csv')">导出 CSV</el-button>
             <el-button size="small" type="primary" plain @click="exportExcel('/api/teacher/statistics/reports/tasks/export/excel', 'teacher-task-stats.xlsx')">导出 Excel</el-button>
           </div>
         </div>
@@ -230,7 +216,6 @@ onMounted(async () => {
         <div class="sectionHeader">
           <span>实验课程统计</span>
           <div class="filterActions">
-            <el-button size="small" @click="exportCsv('/api/teacher/statistics/reports/experiment-courses/export', 'teacher-experiment-course-stats.csv')">导出 CSV</el-button>
             <el-button size="small" type="primary" plain @click="exportExcel('/api/teacher/statistics/reports/experiment-courses/export/excel', 'teacher-experiment-course-stats.xlsx')">导出 Excel</el-button>
           </div>
         </div>
@@ -257,7 +242,6 @@ onMounted(async () => {
         <div class="sectionHeader">
           <span>设备借用统计</span>
           <div class="filterActions">
-            <el-button size="small" @click="exportCsv('/api/teacher/statistics/reports/device-requests/export', 'teacher-device-request-stats.csv')">导出 CSV</el-button>
             <el-button size="small" type="primary" plain @click="exportExcel('/api/teacher/statistics/reports/device-requests/export/excel', 'teacher-device-request-stats.xlsx')">导出 Excel</el-button>
           </div>
         </div>

@@ -111,15 +111,6 @@ async function del(d: Device) {
   }
 }
 
-async function exportCsv() {
-  try {
-    await downloadBlob('/api/admin/devices/export', { token: token.value, fallbackFilename: 'devices.csv' })
-    ElMessage.success('已下载 devices.csv')
-  } catch (e: any) {
-    ElMessage.error(e?.message ?? '导出失败')
-  }
-}
-
 async function exportExcel() {
   try {
     await downloadBlob('/api/admin/devices/export/excel', { token: token.value, fallbackFilename: 'devices.xlsx' })
@@ -144,7 +135,6 @@ onMounted(load)
       </el-select>
       <el-button type="primary" @click="load">查询</el-button>
       <el-button @click="openCreate">新建设备</el-button>
-      <el-button @click="exportCsv">导出 CSV</el-button>
       <el-button type="primary" plain @click="exportExcel">导出 Excel</el-button>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
